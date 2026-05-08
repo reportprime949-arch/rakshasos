@@ -1,0 +1,102 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String            @id @default(uuid())
+  email           String?           @unique
+  phone           String            @unique
+  name            String
+  role            String            @default("CITIZEN")
+  hashedPassword  String
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  officerProfile  OfficerProfile?
+  emergencies     EmergencyRequest[] @relation("CitizenRequest")
+  sessions        DeviceSession[]
+  auditLogs       AuditLog[]
+}
+
+model OfficerProfile {
+  id              String            @id @default(uuid())
+  userId          String            @unique
+  badgeNumber     String            @unique
+  status          String            @default("OFFLINE")
+  lastLat         Float?
+  lastLng         Float?
+  lastSeen        DateTime?
+  
+  user            User              @relation(fields: [userId], references: [id])
+  dispatches      EmergencyRequest[] @relation("OfficerDispatch")
+  locationHistory GPSUpdate[]
+}
+
+model EmergencyRequest {
+  id              String            @id @default(uuid())
+  citizenId       String
+  officerId       String?
+  status          String            @default("PENDING")
+  priority        Int               @default(1)
+  latitude        Float
+  longitude       Float
+  address         String?
+  description     String?
+  
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  resolvedAt      DateTime?
+
+  citizen         User              @relation("CitizenRequest", fields: [citizenId], references: [id])
+  officer         OfficerProfile?   @relation("OfficerDispatch", fields: [officerId], references: [id])
+  timeline        EmergencyTimeline[]
+  auditLogs       AuditLog[]
+}
+
+model EmergencyTimeline {
+  id              String            @id @default(uuid())
+  requestId       String
+  status          String
+  timestamp       DateTime          @default(now())
+  note            String?
+
+  request         EmergencyRequest  @relation(fields: [requestId], references: [id])
+}
+
+model GPSUpdate {
+  id              String            @id @default(uuid())
+  officerId       String
+  latitude        Float
+  longitude       Float
+  timestamp       DateTime          @default(now())
+
+  officer         OfficerProfile    @relation(fields: [officerId], references: [id])
+}
+
+model DeviceSession {
+  id              String            @id @default(uuid())
+  userId          String
+  refreshToken    String            @unique
+  deviceInfo      String?
+  expiresAt       DateTime
+  createdAt       DateTime          @default(now())
+
+  user            User              @relation(fields: [userId], references: [id])
+}
+
+model AuditLog {
+  id              String            @id @default(uuid())
+  userId          String
+  requestId       String?
+  action          String
+  details         String?
+  timestamp       DateTime          @default(now())
+
+  user            User              @relation(fields: [userId], references: [id])
+  emergency       EmergencyRequest? @relation(fields: [requestId], references: [id])
+}

@@ -1,0 +1,83 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Backend API",
+            "type": "shell",
+            "command": "npm run start:dev",
+            "options": {
+                "cwd": "${workspaceFolder}/backend-server"
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "group": "raksha-sos"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Citizen Client",
+            "type": "shell",
+            "command": "npm run dev",
+            "options": {
+                "cwd": "${workspaceFolder}/citizen-app"
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "group": "raksha-sos"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Officer Dashboard",
+            "type": "shell",
+            "command": "npm run dev -- --port 3001",
+            "options": {
+                "cwd": "${workspaceFolder}/officer-app"
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "group": "raksha-sos"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Admin Command Center",
+            "type": "shell",
+            "command": "npm run dev -- --port 3002",
+            "options": {
+                "cwd": "${workspaceFolder}/admin-dashboard"
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "group": "raksha-sos"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run RakshaSOS",
+            "dependsOn": [
+                "Backend API",
+                "Citizen Client",
+                "Officer Dashboard",
+                "Admin Command Center"
+            ],
+            "dependsOrder": "parallel",
+            "runOptions": {
+                "runOn": "folderOpen"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "silent",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        }
+    ]
+}
