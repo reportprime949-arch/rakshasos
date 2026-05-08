@@ -12,7 +12,7 @@ export const useOfficerSocket = (officerId: string, officerName: string) => {
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com';
     console.log('🔌 [SOCKET] Initializing connection to:', API_URL);
 
-    const socket = io(API_URL, {
+    const socketInstance = io(API_URL, {
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -21,12 +21,11 @@ export const useOfficerSocket = (officerId: string, officerName: string) => {
       timeout: 20000,
     });
 
-    socket.on('connect', () => {
-      console.log('✅ [SOCKET CONNECTED] Active ID:', socket.id);
+    socketInstance.on('connect', () => {
+      console.log('✅ [SOCKET CONNECTED] Target:', API_URL, 'ID:', socketInstance.id);
       setSocketStatus('CONNECTED');
       
-      // Register officer with backend
-      socket.emit('officer:join', {
+      socketInstance.emit('officer:join', {
         officerId,
         officerName,
         status: 'online',
@@ -34,41 +33,39 @@ export const useOfficerSocket = (officerId: string, officerName: string) => {
       });
     });
 
-    socket.on('disconnect', (reason) => {
-      console.log('❌ [SOCKET DISCONNECTED] Reason:', reason);
+    socketInstance.on('disconnect', (reason) => {
+      console.warn('❌ [SOCKET DISCONNECTED] Reason:', reason);
       setSocketStatus('DISCONNECTED');
     });
 
-    socket.on('connect_error', (error) => {
-      console.error('⚠️ [SOCKET ERROR]:', error.message);
+    socketInstance.on('connect_error', (error) => {
+      console.error('⚠️ [SOCKET CONNECTION ERROR]:', error.message, 'Target:', API_URL);
       setSocketStatus('CONNECTING');
     });
 
-    socket.on('emergency:all', (incidents) => {
+    socketInstance.on('emergency:all', (incidents: DispatchAlert[]) => {
       console.log('📥 [BULK INCIDENT SYNC] Received:', incidents.length);
       setIncidents(incidents);
     });
 
-    socket.on('emergency:new', (incident) => {
+    socketInstance.on('emergency:new', (incident: DispatchAlert) => {
       console.log('🚨 [NEW INCIDENT RECEIVED]:', incident.id);
       addIncident(incident);
-      
-      // Trigger alarm if not already active
       window.dispatchEvent(new CustomEvent('trigger-alarm'));
     });
 
-    socket.on('emergency:update', (incident) => {
+    socketInstance.on('emergency:update', (incident: DispatchAlert) => {
       console.log('🔄 [INCIDENT UPDATED]:', incident.id, incident.status);
       updateIncident(incident);
     });
 
-    socketRef.current = socket;
+    socketRef.current = socketInstance;
 
     return () => {
       console.log('🔌 [SOCKET] Cleaning up connection...');
-      socket.disconnect();
+      socketInstance.disconnect();
     };
-  }, [officerId, officerName]);
+  }, [officerId, officerName, addIncident, setIncidents, setSocketStatus, updateIncident]);
 
   const acceptIncident = (incidentId: string, officerId: string) => {
     if (socketRef.current && socketRef.current.connected) {
@@ -84,5 +81,5 @@ export const useOfficerSocket = (officerId: string, officerName: string) => {
     }
   };
 
-  return { socket: socketRef.current, acceptIncident };
+  return { acceptIncident };
 };

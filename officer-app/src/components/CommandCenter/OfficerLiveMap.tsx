@@ -92,12 +92,15 @@ const OfficerLiveMap = ({ officerLoc, citizenLoc, active }: MapProps) => {
         const res = await fetch(
           `https://router.project-osrm.org/route/v1/driving/${officerLoc.lng},${officerLoc.lat};${citizenLoc.lng},${citizenLoc.lat}?overview=full&geometries=geojson`
         );
-        const data = await res.json();
+        const text = await res.text();
+        if (!text) return;
+        
+        const data = JSON.parse(text);
         if (data.routes) {
           setRoutes(data.routes);
           if (isInitialLoad) setIsInitialLoad(false);
         }
-      } catch (e) { console.error(e); }
+      } catch (e) { console.error('🔴 [ROUTING ERROR]:', e); }
     };
 
     const timer = setTimeout(fetchRoutes, isInitialLoad ? 0 : 5000);

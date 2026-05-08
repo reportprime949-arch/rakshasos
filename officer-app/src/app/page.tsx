@@ -68,11 +68,25 @@ export default function OfficerHome() {
 
   // Fetch real incidents on mount (Backup to socket sync)
   const fetchIncidents = async () => {
+    const URL = 'https://rakshasos-backend.onrender.com/api/emergency';
     try {
-      const res = await fetch('https://rakshasos-backend.onrender.com/api/emergency');
-      if (!res.ok) throw new Error('Backend unreachable');
-      const data = await res.json();
-      console.log('FETCHED INCIDENTS', data);
+      console.log('📡 [API POLLING] Fetching from:', URL);
+      const res = await fetch(URL, { cache: 'no-store' });
+      
+      if (!res.ok) {
+        console.warn('⚠️ [API UNREACHABLE] Status:', res.status);
+        setBackendStatus('UNREACHABLE');
+        return;
+      }
+
+      const text = await res.text();
+      if (!text) {
+        console.warn('⚠️ [API EMPTY RESPONSE]');
+        return;
+      }
+
+      const data = JSON.parse(text);
+      console.log('📥 [API SUCCESS] Data received:', data.length, 'incidents');
       setBackendStatus('HEALTHY');
       
       const filtered = data.filter((i: any) => i.status === 'pending' || i.status === 'searching');
@@ -91,7 +105,7 @@ export default function OfficerHome() {
         setStatus(assigned.status.toUpperCase());
       }
     } catch (err) {
-      console.error('Fetch error:', err);
+      console.error('🔴 [API CRITICAL ERROR]:', err);
       setBackendStatus('UNREACHABLE');
     }
   };

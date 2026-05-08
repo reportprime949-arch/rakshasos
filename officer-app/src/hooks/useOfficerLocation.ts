@@ -10,11 +10,18 @@ export const useOfficerLocation = (officerId: string, name: string) => {
   const [locationError, setLocationError] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
-  // Initialize background socket for location specifically if needed, 
-  // or use the main one. For simplicity, we'll use a local reference here.
   useEffect(() => {
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com';
-    socketRef.current = io(API_URL, { transports: ['websocket'] });
+    console.log('🛰️ [GPS SOCKET] Connecting to:', API_URL);
+    socketRef.current = io(API_URL, { 
+      transports: ['websocket', 'polling'],
+      reconnection: true 
+    });
+    
+    socketRef.current.on('connect_error', (err) => {
+      console.warn('🛰️ [GPS SOCKET ERROR]', err.message);
+    });
+
     return () => { socketRef.current?.disconnect(); };
   }, []);
 
@@ -30,7 +37,6 @@ export const useOfficerLocation = (officerId: string, name: string) => {
         setLocation(newLoc);
         setLocationError(null);
         
-        // SYNC TO SOCKET IMMEDIATELY
         if (socketRef.current?.connected) {
           socketRef.current.emit('officer:location_update', {
             officerId,
@@ -40,13 +46,13 @@ export const useOfficerLocation = (officerId: string, name: string) => {
         }
       },
       (error) => {
+        console.warn('🛰️ [GPS ERROR]', error.message);
         if (error.code === error.PERMISSION_DENIED) {
           setLocationError("Location permission denied.");
-          setLocation(mockCoords);
         } else {
           setLocationError("Location unavailable.");
-          setLocation(mockCoords);
         }
+        setLocation(mockCoords);
       },
       { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
     );
@@ -68,7 +74,7 @@ export const useOfficerLocation = (officerId: string, name: string) => {
           updatedAt: serverTimestamp(),
         }, { merge: true });
         console.log('🛰️ [GPS] Synced to Firestore');
-      } catch (error) {
+      } catch {
         console.error('🛰️ [GPS] Firestore sync failed');
       }
     };

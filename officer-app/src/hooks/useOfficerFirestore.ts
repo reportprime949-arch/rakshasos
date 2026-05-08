@@ -1,78 +1,86 @@
-import { useEffect, useState } from 'react';
-import { db } from '@/lib/firebase';
-import { collection, query, where, onSnapshot, doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { useOfficerStore } from '@/store/useOfficerStore';
+import { useEffect, useState, useCallback } from 'react';
+import { useOfficerStore, DispatchAlert } from '@/store/useOfficerStore';
 import { calculateDistance } from '@/utils/distance';
 
 export const useOfficerFirestore = (currentLocation: { lat: number; lng: number } | null) => {
   const { setDispatch, isOnline, activeDispatch, setStatus, officerId, officerName } = useOfficerStore();
-  const [pendingEmergencies, setPendingEmergencies] = useState<any[]>([]);
+  const [pendingEmergencies, setPendingEmergencies] = useState<DispatchAlert[]>([]);
+
+  const syncDispatch = useCallback((incident: DispatchAlert) => {
+    if (!activeDispatch || activeDispatch.id !== incident.id) {
+      console.log('✅ [DISPATCH AUTO-SYNC]', incident.id);
+      setDispatch({
+        id: incident.id,
+        citizenName: incident.citizenName,
+        lat: incident.lat,
+        lng: incident.lng,
+        description: incident.description || 'Emergency SOS',
+        status: incident.status
+      });
+    }
+    setStatus(incident.status.toUpperCase() as any);
+  }, [activeDispatch, setDispatch, setStatus]);
 
   useEffect(() => {
     if (!isOnline || !currentLocation) {
-      console.log('⚠️ [OFFICER OFFLINE] or no GPS');
-      setPendingEmergencies([]);
+      setPendingEmergencies((prev) => prev.length > 0 ? [] : prev);
       return;
     }
 
     console.log('🛰️ [OFFICER API POLLING ACTIVE] for ID:', officerId);
 
     const pollInterval = setInterval(async () => {
+      const URL = `${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/emergency`;
       try {
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/emergency`);
-        const allIncidents = await response.json();
+        const response = await fetch(URL, { cache: 'no-store' });
         
-        console.log(`📥 [INCIDENT UPDATE] Fetched ${allIncidents.length} complaints`);
+        if (!response.ok) {
+          console.warn('⚠️ [POLLING FAILED] Status:', response.status);
+          return;
+        }
+
+        const text = await response.text();
+        if (!text) return;
+
+        const allIncidents: DispatchAlert[] = JSON.parse(text);
         
-        const filtered = allIncidents.filter((e: any) => {
+        const filtered = allIncidents.filter((e) => {
           const distance = calculateDistance(
             currentLocation.lat,
             currentLocation.lng,
-            e.location.lat,
-            e.location.lng
+            e.lat || (e as any).location.lat,
+            e.lng || (e as any).location.lng
           );
-          e.distanceKm = distance;
+          (e as any).distanceKm = distance;
           
-          // Match if searching nearby OR if specifically assigned to me
           const isNearby = (e.status === 'pending' || e.status === 'searching') && distance <= 3;
-          const isAssignedToMe = e.assignedOfficerId === officerId;
+          const isAssignedToMe = (e as any).assignedOfficerId === officerId;
           
           return isNearby || isAssignedToMe;
         });
 
-        console.log(`🎯 [FILTERED INCIDENTS]: ${filtered.length}`);
         setPendingEmergencies(filtered);
         
-        // Auto-populate active dispatch
-        const myActiveIncident = filtered.find((e: any) => 
-          e.assignedOfficerId === officerId && 
+        const myActiveIncident = filtered.find((e) => 
+          (e as any).assignedOfficerId === officerId && 
           ['assigned', 'enroute', 'arrived'].includes(e.status)
         );
 
         if (myActiveIncident) {
-          if (!activeDispatch || activeDispatch.id !== myActiveIncident.id) {
-            console.log('✅ [DISPATCH RECEIVED]', myActiveIncident.id);
-            setDispatch({
-              id: myActiveIncident.id,
-              citizenName: myActiveIncident.citizenName,
-              lat: myActiveIncident.location.lat,
-              lng: myActiveIncident.location.lng,
-              description: myActiveIncident.description || 'Emergency SOS',
-            });
-          }
-          setStatus(myActiveIncident.status.toUpperCase());
+          syncDispatch(myActiveIncident);
         }
       } catch (error) {
-        console.error('Polling error:', error);
+        console.error('🔴 [POLLING ERROR]:', error);
       }
-    }, 3000);
+    }, 5000);
 
     return () => clearInterval(pollInterval);
-  }, [isOnline, currentLocation, officerId]);
+  }, [isOnline, currentLocation, officerId, syncDispatch]);
 
   useEffect(() => {
-    const handleNewIncident = (event: any) => {
-      const data = event.detail;
+    const handleNewIncident = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const data = customEvent.detail;
       console.log('💡 [IMMEDIATE UI UPDATE]: New SOS', data.id);
       
       const distance = currentLocation ? calculateDistance(
@@ -89,8 +97,9 @@ export const useOfficerFirestore = (currentLocation: { lat: number; lng: number 
       });
     };
 
-    const handleIncidentUpdate = (event: any) => {
-      const data = event.detail;
+    const handleIncidentUpdate = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const data = customEvent.detail;
       console.log('💡 [IMMEDIATE UI UPDATE]: Incident Status', data.id, data.status);
       
       setPendingEmergencies(prev => prev.map(e => e.id === data.id ? { ...e, ...data } : e));
@@ -102,6 +111,7 @@ export const useOfficerFirestore = (currentLocation: { lat: number; lng: number 
           lat: data.location.lat,
           lng: data.location.lng,
           description: data.description || 'Emergency SOS',
+          status: data.status
         });
         setStatus(data.status.toUpperCase());
       }
@@ -113,12 +123,13 @@ export const useOfficerFirestore = (currentLocation: { lat: number; lng: number 
       window.removeEventListener('new-incident', handleNewIncident);
       window.removeEventListener('incident-updated', handleIncidentUpdate);
     };
-  }, [currentLocation, officerId]);
+  }, [currentLocation, officerId, setDispatch, setStatus]);
 
   const acceptEmergency = async (id: string) => {
-    console.log('👆 [OFFICER ACTION] Accept Button Clicked:', id);
+    const URL = `${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/emergency/${id}`;
+    console.log('👆 [ACTION] Accepting via API:', URL);
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/emergency/${id}`, {
+      const response = await fetch(URL, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -129,13 +140,15 @@ export const useOfficerFirestore = (currentLocation: { lat: number; lng: number 
       });
 
       if (response.ok) {
-        console.log('✅ [OFFICER ACCEPTED INCIDENT]', id);
+        const text = await response.text();
+        console.log('✅ [ACTION SUCCESS] Response:', text);
         setStatus('EN_ROUTE');
         return true;
       }
+      console.warn('❌ [ACTION FAILED] Status:', response.status);
       return false;
     } catch (error) {
-      console.error('🔴 [ACCEPT FAILED]', error);
+      console.error('🔴 [ACTION ERROR]:', error);
       return false;
     }
   };
