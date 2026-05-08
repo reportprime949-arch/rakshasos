@@ -16,7 +16,7 @@ async function bootstrap() {
       'https://rakshasos-citizen.vercel.app',
       'https://rakshasos-officer.vercel.app',
       'https://rakshasos-admin.vercel.app',
-      'http://localhost:3000',
+      'https://rakshasos-backend.onrender.com',
       'http://localhost:3001',
       'http://localhost:3002',
     ],
@@ -34,3 +34,4 @@ async function bootstrap() {
   console.log(`Application is running on: http://localhost:${port}`);
 }
 bootstrap();
+

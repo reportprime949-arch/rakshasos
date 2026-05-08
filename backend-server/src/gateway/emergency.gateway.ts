@@ -13,7 +13,7 @@ import { Logger } from '@nestjs/common';
   namespace: '/emergency',
   cors: {
     origin: [
-      'http://localhost:3000',
+      'https://rakshasos-backend.onrender.com',
       'http://localhost:3001',
       'http://localhost:3002',
       'https://rakshasos-citizen.vercel.app',
@@ -54,3 +54,4 @@ export class EmergencyGateway implements OnGatewayConnection, OnGatewayDisconnec
     this.server.emit(event, payload);
   }
 }
+
