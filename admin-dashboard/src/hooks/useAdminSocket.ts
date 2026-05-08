@@ -9,7 +9,7 @@ export const useAdminSocket = (token?: string) => {
   useEffect(() => {
     if (!token) return;
 
-    const socket = io(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000', {
+    const socket = io(process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com', {
       auth: { token },
     });
 

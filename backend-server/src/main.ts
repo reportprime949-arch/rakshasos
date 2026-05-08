@@ -8,7 +8,22 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   
-  app.enableCors();
+  app.setGlobalPrefix('api');
+  
+  app.enableCors({
+    origin: [
+      'https://rakshasos.vercel.app',
+      'https://rakshasos-citizen.vercel.app',
+      'https://rakshasos-officer.vercel.app',
+      'https://rakshasos-admin.vercel.app',
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:3002',
+    ],
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    credentials: true,
+  });
+
   app.useGlobalPipes(new ValidationPipe({
     whitelist: true,
     transform: true,

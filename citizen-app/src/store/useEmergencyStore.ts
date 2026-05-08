@@ -72,54 +72,28 @@ export const useEmergencyStore = create<EmergencyState>()(
         
         console.log('🚨 TRIGGERING SOS:', id);
 
-        set({
-          id,
-          status: 'SEARCHING',
-          startTime,
-          officer: null,
-          error: null
-        });
-
         const currentLocation = get().location;
 
         try {
-          // 1. Create the emergency document
-          await setDoc(doc(db, 'emergencies', id), {
-            id,
-            citizenId,
-            citizenName,
+          const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/sos`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              citizenName,
+              emergencyType: 'SOS Triggered',
+              location: currentLocation || { lat: 0, lng: 0 }
+            })
+          });
+
+          const data = await response.json();
+
+          set({
+            id: data.id,
             status: 'SEARCHING',
-            lat: currentLocation?.lat || 0,
-            lng: currentLocation?.lng || 0,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-            assignedOfficerId: null,
-          }, { merge: true });
-
-          // 2. Immediate search for officers
-          if (currentLocation) {
-            await findAndAssignOfficer(id, currentLocation);
-          }
-
-          // 3. Set a timeout for retry/failure
-          setTimeout(async () => {
-            const currentStatus = get().status;
-            if (currentStatus === 'SEARCHING') {
-              console.log('🔄 RETRYING OFFICER SEARCH...');
-              const latestLocation = get().location;
-              if (latestLocation) {
-                await findAndAssignOfficer(id, latestLocation);
-              }
-              
-              // Second timeout for final failure
-              setTimeout(() => {
-                if (get().status === 'SEARCHING') {
-                  console.log('❌ NO OFFICERS FOUND');
-                  set({ error: 'NO OFFICERS AVAILABLE. RETRYING...' });
-                }
-              }, 15000);
-            }
-          }, 5000);
+            startTime,
+            officer: null,
+            error: null
+          });
 
         } catch (error) {
           console.error('🔴 SOS CREATION FAILED:', error);
@@ -128,21 +102,7 @@ export const useEmergencyStore = create<EmergencyState>()(
       },
 
       setLocation: async (location) => {
-        const prevLocation = get().location;
         set({ location });
-        
-        const id = get().id;
-        const now = Date.now();
-        if (id && (!prevLocation || (now - get().lastGPSUpdate > 5000))) {
-          try {
-            await setDoc(doc(db, 'emergencies', id), {
-              lat: location.lat,
-              lng: location.lng,
-              updatedAt: serverTimestamp(),
-            }, { merge: true });
-            set({ lastGPSUpdate: now });
-          } catch (e) {}
-        }
       },
 
       updateStatus: (status) => set({ status }),
@@ -164,35 +124,37 @@ export const useEmergencyStore = create<EmergencyState>()(
         const id = get().id;
         if (!id) return () => {};
 
-        console.log('📡 SYNCING WITH FIRESTORE:', id);
+        console.log('📡 SYNCING WITH API (Polling):', id);
 
-        const unsub = onSnapshot(doc(db, 'emergencies', id), (docSnapshot) => {
-          if (docSnapshot.exists()) {
-            const data = docSnapshot.data();
-            console.log('📥 FIRESTORE UPDATE:', data.status, data.assignedOfficerId);
-            
-            if (data.status === 'ASSIGNED' || data.status === 'EN_ROUTE' || data.status === 'ARRIVED') {
-              set({
-                status: data.status as EmergencyStatus,
-                officer: {
-                  id: data.assignedOfficerId,
-                  name: data.officerName || 'Scanning Matrix...',
-                  badge: data.officerBadge || 'OFF-9921',
-                  phone: data.officerPhone || '+1 555-0123',
-                  lat: data.officerLat || (get().location?.lat || 0),
-                  lng: data.officerLng || (get().location?.lng || 0),
-                  eta: data.eta || 'Calculating...',
-                }
-              });
-            } else if (data.status === 'COMPLETED') {
-              set({ status: 'COMPLETED' });
-            } else if (data.status === 'CANCELLED') {
-              get().reset();
+        const interval = setInterval(async () => {
+          try {
+            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/sos/${id}`);
+            const data = await response.json();
+
+            if (data && data.status) {
+              if (data.status === 'assigned' || data.status === 'enroute' || data.status === 'arrived') {
+                set({
+                  status: data.status.toUpperCase() as EmergencyStatus,
+                  officer: {
+                    id: 'OFF-123',
+                    name: 'Officer Response Team',
+                    badge: 'OFF-9921',
+                    phone: '+1 555-0123',
+                    lat: data.location.lat + 0.005, // Mock officer movement
+                    lng: data.location.lng + 0.005,
+                    eta: '4 Min',
+                  }
+                });
+              } else if (data.status === 'resolved') {
+                set({ status: 'COMPLETED' });
+              }
             }
+          } catch (error) {
+            console.error('Polling error:', error);
           }
-        });
+        }, 3000);
 
-        return unsub;
+        return () => clearInterval(interval);
       }
     }),
     {

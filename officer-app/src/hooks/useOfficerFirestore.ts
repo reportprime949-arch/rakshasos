@@ -15,99 +15,80 @@ export const useOfficerFirestore = (currentLocation: { lat: number; lng: number 
       return;
     }
 
-    console.log('🛰️ [OFFICER LISTENER ACTIVE] for ID:', officerId);
+    console.log('🛰️ [OFFICER API POLLING ACTIVE] for ID:', officerId);
 
-    // Listen for incidents that are SEARCHING or specifically ASSIGNED to this officer
-    const q = query(
-      collection(db, 'emergencies'),
-      where('status', 'in', ['SEARCHING', 'ASSIGNED', 'EN_ROUTE', 'ARRIVED'])
-    );
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/sos`);
+        const allIncidents = await response.json();
+        
+        console.log(`📥 [INCIDENT UPDATE] Fetched ${allIncidents.length} complaints`);
+        
+        const filtered = allIncidents.filter((e: any) => {
+          const distance = calculateDistance(
+            currentLocation.lat,
+            currentLocation.lng,
+            e.location.lat,
+            e.location.lng
+          );
+          e.distanceKm = distance;
+          
+          // Match if searching nearby OR if specifically assigned to me
+          const isNearby = (e.status === 'pending' || e.status === 'searching') && distance <= 3;
+          const isAssignedToMe = e.assignedOfficerId === officerId;
+          
+          return isNearby || isAssignedToMe;
+        });
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      console.log(`📥 [INCIDENT UPDATE] Snapshot received: ${snapshot.size} docs`);
-      
-      const allIncidents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-      
-      const filtered = allIncidents.filter(e => {
-        const distance = calculateDistance(
-          currentLocation.lat,
-          currentLocation.lng,
-          e.lat,
-          e.lng
+        console.log(`🎯 [FILTERED INCIDENTS]: ${filtered.length}`);
+        setPendingEmergencies(filtered);
+        
+        // Auto-populate active dispatch
+        const myActiveIncident = filtered.find((e: any) => 
+          e.assignedOfficerId === officerId && 
+          ['assigned', 'enroute', 'arrived'].includes(e.status)
         );
-        e.distanceKm = distance;
-        
-        // Match if searching nearby OR if specifically assigned to me
-        const isNearby = e.status === 'SEARCHING' && distance <= 3;
-        const isAssignedToMe = e.assignedOfficerId === officerId;
-        
-        return isNearby || isAssignedToMe;
-      });
 
-      console.log(`🎯 [FILTERED INCIDENTS]: ${filtered.length}`);
-      setPendingEmergencies(filtered);
-      
-      // Auto-populate active dispatch if we were assigned or are en route
-      const myActiveIncident = filtered.find(e => 
-        e.assignedOfficerId === officerId && 
-        ['ASSIGNED', 'EN_ROUTE', 'ARRIVED'].includes(e.status)
-      );
-
-      if (myActiveIncident) {
-        if (!activeDispatch || activeDispatch.id !== myActiveIncident.id) {
-          console.log('✅ [DISPATCH RECEIVED]', myActiveIncident.id);
-          setDispatch({
-            id: myActiveIncident.id,
-            citizenName: myActiveIncident.citizenName,
-            lat: myActiveIncident.lat,
-            lng: myActiveIncident.lng,
-            description: myActiveIncident.description || 'Emergency SOS',
-          });
+        if (myActiveIncident) {
+          if (!activeDispatch || activeDispatch.id !== myActiveIncident.id) {
+            console.log('✅ [DISPATCH RECEIVED]', myActiveIncident.id);
+            setDispatch({
+              id: myActiveIncident.id,
+              citizenName: myActiveIncident.citizenName,
+              lat: myActiveIncident.location.lat,
+              lng: myActiveIncident.location.lng,
+              description: myActiveIncident.description || 'Emergency SOS',
+            });
+          }
+          setStatus(myActiveIncident.status.toUpperCase());
         }
-        
-        // Sync local status with Firestore status
-        setStatus(myActiveIncident.status);
-        console.log(`🔄 [STATUS UPDATED] to ${myActiveIncident.status}`);
-      } else {
-        if (activeDispatch) {
-          console.log('🏁 [DISPATCH RESOLVED OR REMOVED]');
-          setDispatch(null);
-        }
+      } catch (error) {
+        console.error('Polling error:', error);
       }
-    });
+    }, 3000);
 
-    return () => unsubscribe();
+    return () => clearInterval(pollInterval);
   }, [isOnline, currentLocation, officerId]);
 
   const acceptEmergency = async (id: string) => {
     console.log('👆 [OFFICER ACTION] Accept Button Clicked:', id);
     try {
-      // 1. Update Emergency Document
-      const emergencyRef = doc(db, 'emergencies', id);
-      await setDoc(emergencyRef, {
-        status: 'EN_ROUTE',
-        acceptedAt: serverTimestamp(),
-        officerAccepted: true,
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-      
-      console.log('✅ [OFFICER ACCEPTED INCIDENT]', id);
-      console.log('📡 [STATUS UPDATED TO EN_ROUTE]');
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/sos/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'enroute',
+          officerId,
+          officerName
+        })
+      });
 
-      // 2. Update/Create Dispatch Document for Admin tracking
-      const dispatchRef = doc(db, 'dispatches', `DISPATCH-${id}`);
-      await setDoc(dispatchRef, {
-        emergencyId: id,
-        officerId,
-        officerName,
-        dispatchStatus: 'ACTIVE',
-        startedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-
-      setStatus('EN_ROUTE');
-      console.log('📊 [CITIZEN SYNCED] via Firestore');
-      return true;
+      if (response.ok) {
+        console.log('✅ [OFFICER ACCEPTED INCIDENT]', id);
+        setStatus('EN_ROUTE');
+        return true;
+      }
+      return false;
     } catch (error) {
       console.error('🔴 [ACCEPT FAILED]', error);
       return false;
