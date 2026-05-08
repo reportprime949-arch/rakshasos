@@ -28,11 +28,15 @@ export default function AdminDashboard() {
   useAdminFirestore();
   useAdminSocket();
 
+  // Filter emergencies into active and resolved
+  const activeIncidents = emergencies.filter(e => !['RESOLVED', 'COMPLETED', 'CANCELLED'].includes(e.status.toUpperCase()));
+  const resolvedIncidents = emergencies.filter(e => ['RESOLVED', 'COMPLETED'].includes(e.status.toUpperCase()));
+
   // Monitor for new incidents to trigger visual alerts only
   useEffect(() => {
-    const hasPending = emergencies.some(i => i.status === 'PENDING' || i.status === 'SEARCHING');
+    const hasPending = activeIncidents.some(i => i.status === 'PENDING' || i.status === 'SEARCHING');
     setIsEmergencyVisualActive(hasPending);
-  }, [emergencies]);
+  }, [activeIncidents]);
 
   return (
     <div className={`flex h-screen bg-black text-white overflow-hidden font-sans transition-all duration-700 ${isEmergencyVisualActive ? 'shadow-[inset_0_0_150px_rgba(220,38,38,0.4)] ring-4 ring-red-600 ring-inset' : ''}`}>
@@ -69,75 +73,49 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
-          <div className="flex items-center justify-between px-2">
-            <h2 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">Active Incidents</h2>
-            <span className="bg-red-500/10 text-red-500 text-[10px] px-3 py-1 rounded-full font-black border border-red-500/20">
-              {emergencies.length} LIVE
-            </span>
+        <div className="flex-1 overflow-y-auto p-6 space-y-10 custom-scrollbar">
+          {/* ACTIVE INCIDENTS */}
+          <div className="space-y-6">
+            <div className="flex items-center justify-between px-2">
+              <h2 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">Active Incidents</h2>
+              <span className="bg-red-500/10 text-red-500 text-[10px] px-3 py-1 rounded-full font-black border border-red-500/20">
+                {activeIncidents.length} LIVE
+              </span>
+            </div>
+
+            <AnimatePresence mode="popLayout">
+              {activeIncidents.length === 0 ? (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="p-8 text-center border border-dashed border-white/5 rounded-3xl"
+                >
+                  <Activity size={24} className="mx-auto text-gray-800 mb-3" />
+                  <p className="text-[8px] text-gray-600 font-bold uppercase tracking-widest">Awaiting Emergencies</p>
+                </motion.div>
+              ) : (
+                activeIncidents.map((alert: any) => (
+                  <IncidentRow key={alert.id} alert={alert} isActive />
+                ))
+              )}
+            </AnimatePresence>
           </div>
 
-          <AnimatePresence mode="popLayout">
-            {emergencies.length === 0 ? (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="p-12 text-center border border-dashed border-white/10 rounded-3xl"
-              >
-                <Activity size={32} className="mx-auto text-gray-800 mb-4" />
-                <p className="text-xs text-gray-600 font-bold uppercase tracking-widest">No active emergencies detected</p>
-              </motion.div>
-            ) : (
-              emergencies.map((alert: any) => (
-                <motion.div
-                  key={alert.id}
-                  layout
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  className={`p-6 rounded-[2rem] border transition-all hover:bg-white/5 cursor-pointer group ${
-                    alert.status === 'PENDING' || alert.status === 'SEARCHING' ? 'bg-red-500/5 border-red-500/20' : 'bg-white/5 border-white/5'
-                  }`}
-                >
-                  <div className="flex justify-between items-start mb-4">
-                    <div className="space-y-1">
-                      <p className="text-[10px] text-gray-500 font-black uppercase tracking-widest">Incident ID</p>
-                      <h3 className="text-lg font-black tracking-tighter italic">{alert.id}</h3>
-                    </div>
-                    <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${
-                      alert.status === 'PENDING' || alert.status === 'SEARCHING' ? 'bg-red-500 text-white' : 'bg-blue-500/20 text-blue-500'
-                    }`}>
-                      {alert.status}
-                    </div>
-                  </div>
+          {/* RESOLVED INCIDENTS (HISTORY) */}
+          <div className="space-y-6 opacity-60 hover:opacity-100 transition-opacity">
+            <div className="flex items-center justify-between px-2">
+              <h2 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">Incident History</h2>
+              <span className="bg-green-500/10 text-green-500 text-[10px] px-3 py-1 rounded-full font-black border border-green-500/20">
+                {resolvedIncidents.length} ARCHIVED
+              </span>
+            </div>
 
-                  <div className="space-y-3 mb-6">
-                    <div className="flex items-center space-x-3">
-                      <Users size={14} className="text-gray-600" />
-                      <p className="text-xs font-bold text-gray-400">{alert.citizenName || 'Unknown Citizen'}</p>
-                    </div>
-                    <div className="flex items-center space-x-3">
-                      <MapPin size={14} className="text-gray-600" />
-                      <p className="text-[10px] font-mono text-gray-500">
-                        {alert.lat?.toFixed(4) || '0.0000'}, {alert.lng?.toFixed(4) || '0.0000'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-4 border-t border-white/5">
-                    {alert.assignedOfficerId ? (
-                      <div className="flex items-center space-x-2">
-                        <div className="w-2 h-2 rounded-full bg-blue-500" />
-                        <p className="text-[10px] font-black uppercase text-blue-500">Officer Assigned</p>
-                      </div>
-                    ) : (
-                      <p className="text-[10px] font-black uppercase text-amber-500 animate-pulse">Awaiting Dispatch</p>
-                    )}
-                    <ExternalLink size={14} className="text-gray-700 group-hover:text-white transition-colors" />
-                  </div>
-                </motion.div>
-              ))
-            )}
-          </AnimatePresence>
+            <div className="space-y-4">
+              {resolvedIncidents.map((alert: any) => (
+                <IncidentRow key={alert.id} alert={alert} isActive={false} />
+              ))}
+            </div>
+          </div>
         </div>
       </aside>
 
@@ -195,5 +173,71 @@ export default function AdminDashboard() {
         }
       `}</style>
     </div>
+  );
+}
+
+// Sub-component for incident rows to keep main code clean
+function IncidentRow({ alert, isActive }: { alert: any, isActive: boolean }) {
+  const isResolved = alert.status === 'RESOLVED' || alert.status === 'COMPLETED';
+  
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      className={`p-6 rounded-[2rem] border transition-all hover:bg-white/5 cursor-pointer group ${
+        isActive && (alert.status === 'PENDING' || alert.status === 'SEARCHING') 
+          ? 'bg-red-500/5 border-red-500/20 shadow-[0_0_20px_rgba(239,68,68,0.05)]' 
+          : isResolved 
+            ? 'bg-green-500/5 border-green-500/10' 
+            : 'bg-white/5 border-white/5'
+      }`}
+    >
+      <div className="flex justify-between items-start mb-4">
+        <div className="space-y-1">
+          <p className="text-[10px] text-gray-500 font-black uppercase tracking-widest">Incident ID</p>
+          <h3 className="text-lg font-black tracking-tighter italic">{alert.id}</h3>
+        </div>
+        <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${
+          isActive && (alert.status === 'PENDING' || alert.status === 'SEARCHING') 
+            ? 'bg-red-500 text-white' 
+            : isResolved 
+              ? 'bg-green-500 text-white' 
+              : 'bg-blue-500/20 text-blue-500'
+        }`}>
+          {alert.status}
+        </div>
+      </div>
+
+      <div className="space-y-3 mb-6">
+        <div className="flex items-center space-x-3">
+          <Users size={14} className="text-gray-600" />
+          <p className="text-xs font-bold text-gray-400">{alert.citizenName || 'Unknown Citizen'}</p>
+        </div>
+        <div className="flex items-center space-x-3">
+          <MapPin size={14} className="text-gray-600" />
+          <p className="text-[10px] font-mono text-gray-500">
+            {alert.lat?.toFixed(4) || '0.0000'}, {alert.lng?.toFixed(4) || '0.0000'}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between pt-4 border-t border-white/5">
+        {isResolved ? (
+          <div className="flex items-center space-x-2">
+            <div className="w-2 h-2 rounded-full bg-green-500" />
+            <p className="text-[10px] font-black uppercase text-green-500">Case Resolved</p>
+          </div>
+        ) : alert.assignedOfficerId ? (
+          <div className="flex items-center space-x-2">
+            <div className="w-2 h-2 rounded-full bg-blue-500" />
+            <p className="text-[10px] font-black uppercase text-blue-500">Officer Assigned</p>
+          </div>
+        ) : (
+          <p className="text-[10px] font-black uppercase text-amber-500 animate-pulse">Awaiting Dispatch</p>
+        )}
+        <ExternalLink size={14} className="text-gray-700 group-hover:text-white transition-colors" />
+      </div>
+    </motion.div>
   );
 }

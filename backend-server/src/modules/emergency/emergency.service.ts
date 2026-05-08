@@ -143,4 +143,12 @@ export class EmergencyService {
   async getSOSById(id: string) {
     return this.sosComplaints.find(s => s.id === id);
   }
+
+  async resolveSOS(id: string, officerId: string) {
+    const officerData = {
+      resolvedBy: officerId,
+      resolvedAt: new Date().toISOString(),
+    };
+    return this.updateStatus(id, 'resolved', officerData);
+  }
 }

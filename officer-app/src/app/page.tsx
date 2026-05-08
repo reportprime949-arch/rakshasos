@@ -25,6 +25,7 @@ import { IncidentCard } from '@/components/CommandCenter/IncidentCard';
 import { IncidentTimeline } from '@/components/CommandCenter/IncidentTimeline';
 import { AudioVisualizer } from '@/components/CommandCenter/AudioVisualizer';
 import { LocationPermissionModal } from '@/components/CommandCenter/LocationPermissionModal';
+import { ResolutionSuccessModal } from '@/components/CommandCenter/ResolutionSuccessModal';
 
 // Dynamic import for Map to prevent SSR issues
 const OfficerLiveMap = dynamic(() => import('@/components/CommandCenter/OfficerLiveMap'), { 
@@ -60,6 +61,8 @@ export default function OfficerHome() {
 
   const [isAccepting, setIsAccepting] = useState(false);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
+  const [showResolveModal, setShowResolveModal] = useState(false);
+  const [lastResolvedId, setLastResolvedId] = useState('');
   const [isAlarmActive, setIsAlarmActive] = useState(false);
   const emergencyAlarmRef = useRef<HTMLAudioElement | null>(null);
   const vibrationIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -214,27 +217,44 @@ export default function OfficerHome() {
   const handleArrived = async () => {
     if (!activeDispatch) return;
     try {
-      await setDoc(doc(db, 'emergencies', activeDispatch.id), {
-        status: 'ARRIVED',
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
+      console.log('🚔 [OFFICER ARRIVED]:', activeDispatch.id);
+      const res = await fetch(`https://rakshasos-backend.onrender.com/api/emergency/${activeDispatch.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'arrived' })
+      });
+
+      if (!res.ok) throw new Error('Failed to update status');
+
       setStatus('ARRIVED');
     } catch (e) {
-      console.error('Error updating status to ARRIVED:', e);
+      console.error('🔴 [ARRIVAL FAILED]:', e);
     }
   };
 
   const handleResolve = async () => {
     if (!activeDispatch) return;
+    const resolvedId = activeDispatch.id;
     try {
-      await setDoc(doc(db, 'emergencies', activeDispatch.id), {
-        status: 'COMPLETED',
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
+      console.log('🏁 [RESOLVING INCIDENT]:', resolvedId);
+      const res = await fetch(`https://rakshasos-backend.onrender.com/api/emergency/${resolvedId}/resolve`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ officerId })
+      });
+
+      if (!res.ok) throw new Error('Failed to resolve incident');
+
+      setLastResolvedId(resolvedId);
+      setShowResolveModal(true);
       clearDispatch();
       setStatus('IDLE');
+      
+      // Refresh incidents list
+      fetchIncidents();
     } catch (e) {
-      console.error('Error resolving emergency:', e);
+      console.error('🔴 [RESOLVE FAILED]:', e);
+      alert('Failed to resolve emergency. Please try again.');
     }
   };
 
@@ -462,6 +482,13 @@ export default function OfficerHome() {
         <LocationPermissionModal 
           isOpen={showPermissionModal} 
           onRetry={handleRetryLocation} 
+        />
+
+        {/* Resolution Success Modal */}
+        <ResolutionSuccessModal
+          isOpen={showResolveModal}
+          onClose={() => setShowResolveModal(false)}
+          incidentId={lastResolvedId}
         />
 
         {/* Production Debug Panel */}

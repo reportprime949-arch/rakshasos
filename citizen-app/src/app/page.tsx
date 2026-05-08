@@ -233,7 +233,7 @@ export default function CitizenHome() {
                 Emergency <span className="text-green-500">Resolved</span>
               </h2>
               <div className="flex flex-col items-center space-y-2">
-                <p className="text-sm text-gray-400 font-medium tracking-wide">Officer has successfully reached your location.</p>
+                <p className="text-sm text-gray-400 font-medium tracking-wide">Authorities have resolved your emergency.</p>
                 <motion.div 
                   animate={{ opacity: [0.5, 1, 0.5] }}
                   transition={{ repeat: Infinity, duration: 2 }}

@@ -9,14 +9,16 @@ export const IncidentTimeline = ({ status }: { status: string }) => {
     { id: 'SOS_TRIGGERED', label: 'SOS Triggered' },
     { id: 'ALERT_RECEIVED', label: 'Alert Received' },
     { id: 'EN_ROUTE', label: 'En Route' },
-    { id: 'ARRIVED', label: 'Arrived' }
+    { id: 'ARRIVED', label: 'Arrived' },
+    { id: 'RESOLVED', label: 'Resolved' }
   ];
 
   const getStatusIndex = () => {
     if (status === 'IDLE') return -1;
-    if (status === 'PENDING') return 1;
-    if (status === 'RESPONDING') return 2;
+    if (status === 'PENDING' || status === 'SEARCHING') return 1;
+    if (status === 'ASSIGNED' || status === 'RESPONDING' || status === 'EN_ROUTE') return 2;
     if (status === 'ARRIVED') return 3;
+    if (status === 'RESOLVED' || status === 'COMPLETED') return 4;
     return 1;
   };
 

@@ -42,4 +42,10 @@ export class EmergencyController {
   async getById(@Param('id') id: string) {
     return this.emergencyService.getSOSById(id);
   }
+
+  @Patch(':id/resolve')
+  async resolve(@Param('id') id: string, @Body('officerId') officerId: string) {
+    this.logger.log(`🏁 Resolving incident ${id} by officer ${officerId}`);
+    return this.emergencyService.resolveSOS(id, officerId);
+  }
 }
