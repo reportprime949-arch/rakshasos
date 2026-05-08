@@ -1,13 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { RedisService } from '../../redis.service';
-import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { EmergencyGateway } from '../../gateway/emergency.gateway';
 import { PrismaService } from '../../prisma.service';
 
 @Injectable()
 export class TrackingService {
   constructor(
     private redis: RedisService,
-    private realtime: RealtimeGateway,
+    private gateway: EmergencyGateway,
     private prisma: PrismaService,
   ) {}
 
@@ -24,7 +24,7 @@ export class TrackingService {
     await this.redis.updateResponderLocation(officerId, lat, lng);
 
     // 2. Broadcast to relevant rooms
-    this.realtime.server.to('ADMIN').emit('officer_moved', { officerId, lat, lng });
+    this.gateway.server.emit('officer_moved', { officerId, lat, lng });
 
     // Find if officer is currently on a dispatch
     const activeRequest = await this.prisma.emergencyRequest.findFirst({
@@ -35,7 +35,13 @@ export class TrackingService {
     });
 
     if (activeRequest) {
-      this.realtime.sendToCitizen(activeRequest.citizenId, 'officer_location_update', { lat, lng });
+      // In EmergencyGateway we use simple broadcast for now to ensure reliability
+      this.gateway.server.emit('officer_location_update', { 
+        id: activeRequest.id,
+        citizenId: activeRequest.citizenId,
+        lat, 
+        lng 
+      });
     }
 
     // 3. Batch persistent log (Async)

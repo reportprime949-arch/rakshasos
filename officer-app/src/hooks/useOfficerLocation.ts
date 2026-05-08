@@ -1,45 +1,58 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { db } from '@/lib/firebase';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { useOfficerStore } from '@/store/useOfficerStore';
+import { io, Socket } from 'socket.io-client';
 
 export const useOfficerLocation = (officerId: string, name: string) => {
   const { isOnline } = useOfficerStore();
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const socketRef = useRef<Socket | null>(null);
+
+  // Initialize background socket for location specifically if needed, 
+  // or use the main one. For simplicity, we'll use a local reference here.
+  useEffect(() => {
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com';
+    socketRef.current = io(API_URL, { transports: ['websocket'] });
+    return () => { socketRef.current?.disconnect(); };
+  }, []);
 
   useEffect(() => {
     if (!isOnline) return;
 
-    // Use mock coordinates for testing if location is blocked/unavailable
     const mockCoords = { lat: 17.3850, lng: 78.4867 };
 
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
-        setLocation({ lat: latitude, lng: longitude });
+        const newLoc = { lat: latitude, lng: longitude };
+        setLocation(newLoc);
         setLocationError(null);
+        
+        // SYNC TO SOCKET IMMEDIATELY
+        if (socketRef.current?.connected) {
+          socketRef.current.emit('officer:location_update', {
+            officerId,
+            ...newLoc,
+            timestamp: Date.now()
+          });
+        }
       },
       (error) => {
-        // Handle denied permissions or other errors gracefully
         if (error.code === error.PERMISSION_DENIED) {
-          setLocationError("Please allow location access to receive nearby emergencies.");
-          // Fallback to mock coordinates for testing
+          setLocationError("Location permission denied.");
           setLocation(mockCoords);
         } else {
-          setLocationError("Location unavailable. Using default coordinates.");
+          setLocationError("Location unavailable.");
           setLocation(mockCoords);
         }
       },
-      { 
-        enableHighAccuracy: true, 
-        timeout: 10000, 
-        maximumAge: 0 
-      }
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [isOnline]);
+  }, [isOnline, officerId]);
 
   useEffect(() => {
     if (!isOnline || !location) return;
@@ -52,15 +65,16 @@ export const useOfficerLocation = (officerId: string, name: string) => {
           lat: location.lat,
           lng: location.lng,
           active: true,
-          radiusKm: 3,
           updatedAt: serverTimestamp(),
         }, { merge: true });
+        console.log('🛰️ [GPS] Synced to Firestore');
       } catch (error) {
-        // Silently handle firestore errors
+        console.error('🛰️ [GPS] Firestore sync failed');
       }
     };
 
-    const interval = setInterval(updateFirestore, 5000);
+    // Throttle Firestore updates to every 10 seconds to save battery/quota
+    const interval = setInterval(updateFirestore, 10000);
     updateFirestore();
 
     return () => clearInterval(interval);

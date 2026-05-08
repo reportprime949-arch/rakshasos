@@ -19,7 +19,6 @@ import dynamic from 'next/dynamic';
 import { db } from '@/lib/firebase';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { useOfficerStore } from '@/store/useOfficerStore';
-import { useOfficerFirestore } from '@/hooks/useOfficerFirestore';
 import { useOfficerLocation } from '@/hooks/useOfficerLocation';
 import { useOfficerSocket } from '@/hooks/useOfficerSocket';
 import { IncidentCard } from '@/components/CommandCenter/IncidentCard';
@@ -44,9 +43,16 @@ export default function OfficerHome() {
   const { 
     isOnline, 
     activeDispatch, 
+    activeIncidents,
     status, 
+    socketStatus,
+    backendStatus,
     setOnline, 
     setStatus, 
+    setIncidents,
+    setDispatch,
+    setSocketStatus,
+    setBackendStatus,
     clearDispatch,
     officerId,
     officerName
@@ -59,11 +65,48 @@ export default function OfficerHome() {
   const vibrationIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const { location, locationError } = useOfficerLocation(officerId, officerName);
-  const { pendingEmergencies, acceptEmergency } = useOfficerFirestore(location);
-  
-  // Realtime Socket
-  useOfficerSocket(officerId);
-  
+
+  // Fetch real incidents on mount (Backup to socket sync)
+  const fetchIncidents = async () => {
+    try {
+      const res = await fetch('https://rakshasos-backend.onrender.com/api/emergency');
+      if (!res.ok) throw new Error('Backend unreachable');
+      const data = await res.json();
+      console.log('FETCHED INCIDENTS', data);
+      setBackendStatus('HEALTHY');
+      
+      const filtered = data.filter((i: any) => i.status === 'pending' || i.status === 'searching');
+      setIncidents(filtered);
+
+      const assigned = data.find((i: any) => i.assignedOfficerId === officerId && ['assigned', 'enroute', 'arrived'].includes(i.status));
+      if (assigned) {
+        setDispatch({
+          id: assigned.id,
+          citizenName: assigned.citizenName,
+          lat: assigned.location.lat,
+          lng: assigned.location.lng,
+          description: assigned.description || 'Emergency SOS',
+          status: assigned.status
+        });
+        setStatus(assigned.status.toUpperCase());
+      }
+    } catch (err) {
+      console.error('Fetch error:', err);
+      setBackendStatus('UNREACHABLE');
+    }
+  };
+
+  useEffect(() => {
+    fetchIncidents();
+    
+    const handleAlarmEvent = () => startEmergencyAlarm();
+    window.addEventListener('trigger-alarm', handleAlarmEvent);
+    return () => window.removeEventListener('trigger-alarm', handleAlarmEvent);
+  }, []);
+
+  // Realtime Socket Subscription
+  const { acceptIncident: emitAccept } = useOfficerSocket(officerId, officerName);
+
   useEffect(() => {
     if (locationError) {
       setShowPermissionModal(true);
@@ -118,14 +161,12 @@ export default function OfficerHome() {
 
   // Monitor for new incidents to start alarm
   useEffect(() => {
-    const hasPending = pendingEmergencies.some(i => i.status === 'PENDING' || i.status === 'SEARCHING' || i.status === 'PRIORITY');
+    const hasPending = activeIncidents.some(i => i.status === 'pending' || i.status === 'searching');
     
-    if (hasPending && !isAlarmActive) {
+    if (hasPending && !isAlarmActive && !activeDispatch) {
       startEmergencyAlarm();
     }
-    // We intentionally DO NOT stop the alarm here as per requirements.
-    // It ONLY stops via stopEmergencyAlarm() called in handleAcceptIncident.
-  }, [pendingEmergencies, isAlarmActive]);
+  }, [activeIncidents, isAlarmActive, activeDispatch]);
 
   const handleAlarmTrigger = (active: boolean) => {
     // This is now handled by startEmergencyAlarm
@@ -136,20 +177,13 @@ export default function OfficerHome() {
     stopEmergencyAlarm();
     console.log('✅ Alarm stopped after ACCEPT');
     console.log('👆 [ACCEPT BUTTON CLICKED]', id);
-    console.log('🔍 [VALIDATING INCIDENT]');
     setIsAccepting(true);
-    console.log('📡 [FIRESTORE UPDATE START]');
     
-    const success = await acceptEmergency(id);
+    console.log('INCIDENT ACCEPTED', id);
+    emitAccept(id, officerId);
     
-    if (success) {
-      console.log('✅ [FIRESTORE UPDATE SUCCESS]');
-      console.log('🚑 [OFFICER STATUS EN_ROUTE]');
-      console.log('📊 [CITIZEN REALTIME UPDATED]');
-      console.log('🗺️ [NAVIGATION MODE ACTIVE]');
-    } else {
-      console.log('🔴 [ACCEPT FAILED] - Check Firestore permissions or network');
-    }
+    // Optimistic update
+    setStatus('ASSIGNED');
     setIsAccepting(false);
   };
 
@@ -243,7 +277,7 @@ export default function OfficerHome() {
                 <h2 className="text-xs font-black text-white/40 uppercase tracking-[0.4em]">Active Incident</h2>
               </div>
               <div className="flex items-center space-x-2">
-                {pendingEmergencies.length > 0 && !activeDispatch && (
+                {activeIncidents.length > 0 && !activeDispatch && (
                   <motion.span 
                     animate={{ scale: [1, 1.1, 1] }}
                     transition={{ repeat: Infinity, duration: 1 }}
@@ -306,9 +340,9 @@ export default function OfficerHome() {
                     </button>
                   )}
                 </motion.div>
-              ) : pendingEmergencies.length > 0 ? (
+              ) : activeIncidents.length > 0 ? (
                 <div className="grid gap-6">
-                  {pendingEmergencies.map((emergency) => (
+                  {activeIncidents.map((emergency) => (
                     <IncidentCard 
                       key={emergency.id}
                       emergency={emergency}
@@ -325,7 +359,7 @@ export default function OfficerHome() {
                   className="py-20 text-center space-y-6 opacity-20"
                 >
                   <Activity size={48} className="mx-auto text-gray-500 animate-pulse" />
-                  <p className="text-[10px] font-black uppercase tracking-[0.4em]">Scanning Global Matrix</p>
+                  <p className="text-[10px] font-black uppercase tracking-[0.4em]">Unit Ready: Awaiting Dispatch</p>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -404,9 +438,36 @@ export default function OfficerHome() {
           onRetry={handleRetryLocation} 
         />
 
+        {/* Production Debug Panel */}
+        <div className="absolute bottom-10 right-10 z-[200] glass p-6 rounded-[2rem] border border-white/5 bg-black/80 backdrop-blur-3xl w-72 space-y-4">
+          <div className="flex items-center justify-between">
+            <h4 className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">System Health</h4>
+            <div className={`w-2 h-2 rounded-full ${socketStatus === 'CONNECTED' ? 'bg-green-500' : 'bg-red-500'} animate-pulse`} />
+          </div>
+          
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <span className="text-[8px] text-gray-500 font-bold uppercase">Socket</span>
+              <span className={`text-[8px] font-black uppercase ${socketStatus === 'CONNECTED' ? 'text-green-500' : 'text-red-500'}`}>{socketStatus}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-[8px] text-gray-500 font-bold uppercase">Backend</span>
+              <span className={`text-[8px] font-black uppercase ${backendStatus === 'HEALTHY' ? 'text-blue-500' : 'text-red-500'}`}>{backendStatus}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-[8px] text-gray-500 font-bold uppercase">Active SOS</span>
+              <span className="text-[8px] font-black text-white uppercase">{activeIncidents.length}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-[8px] text-gray-500 font-bold uppercase">Firebase</span>
+              <span className="text-[8px] font-black text-green-500 uppercase italic">SYNCED</span>
+            </div>
+          </div>
+        </div>
+
         {/* Priority Alert Banner */}
         <AnimatePresence>
-          {pendingEmergencies.length > 0 && !activeDispatch && (
+          {activeIncidents.length > 0 && !activeDispatch && (
             <motion.div
               initial={{ y: 100, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
@@ -420,7 +481,7 @@ export default function OfficerHome() {
                    </div>
                    <div>
                       <h3 className="text-2xl font-black italic uppercase tracking-tighter text-white leading-none">Priority Priority Alert</h3>
-                      <p className="text-[10px] font-black uppercase tracking-[0.4em] text-white/60 mt-2">New Incident detected within 3KM range</p>
+                      <p className="text-[10px] font-black uppercase tracking-[0.4em] text-white/60 mt-2">New Incident detected within range</p>
                    </div>
                 </div>
                 <ArrowRight size={32} className="text-white/40" />

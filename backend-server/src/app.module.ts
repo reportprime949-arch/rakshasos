@@ -6,7 +6,6 @@ import { UserModule } from './modules/user/user.module';
 import { EmergencyModule } from './modules/emergency/emergency.module';
 import { TrackingModule } from './modules/tracking/tracking.module';
 import { OfficerModule } from './modules/officer/officer.module';
-import { RealtimeModule } from './modules/realtime/realtime.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { AuditModule } from './modules/audit/audit.module';
 
@@ -20,7 +19,6 @@ import { FirebaseModule } from './firebase/firebase.module';
     EmergencyModule,
     TrackingModule,
     OfficerModule,
-    RealtimeModule,
     NotificationModule,
     AuditModule,
   ],

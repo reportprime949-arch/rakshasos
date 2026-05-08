@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { EmergencyGateway } from '../../gateway/emergency.gateway';
+import { FirebaseService } from '../../firebase/firebase.service';
 
 @Injectable()
 export class EmergencyService {
@@ -8,7 +9,11 @@ export class EmergencyService {
   // In-memory storage for SOS complaints
   private sosComplaints: any[] = [];
 
-  constructor(private readonly gateway: EmergencyGateway) {}
+  constructor(
+    @Inject(forwardRef(() => EmergencyGateway))
+    private readonly gateway: EmergencyGateway,
+    private readonly firebase: FirebaseService,
+  ) {}
 
   async createSOS(data: { citizenName?: string; citizenId?: string; emergencyType: string; location: { lat: number; lng: number } }) {
     const newSOS = {
@@ -27,6 +32,28 @@ export class EmergencyService {
     this.sosComplaints.push(newSOS);
     this.logger.log(`🚨 SOS CREATED: ${newSOS.id} for ${newSOS.citizenName}`);
     
+    // FIREBASE SYNC
+    try {
+      const db = this.firebase.getFirestore();
+      if (db) {
+        await db.collection('emergencies').doc(newSOS.id).set({
+          ...newSOS,
+          updatedAt: new Date().toISOString(),
+        });
+        this.logger.log(`🔥 [FIREBASE] Sync Success: ${newSOS.id}`);
+      }
+      
+      // BROADCAST PUSH NOTIFICATION TO ALL OFFICERS
+      await this.firebase.sendPushNotification(
+        'officers_topic', // Assuming a topic for officers
+        '🚨 NEW EMERGENCY SOS',
+        `${newSOS.emergencyType.toUpperCase()} alert from ${newSOS.citizenName}`,
+        { incidentId: newSOS.id }
+      );
+    } catch (err) {
+      this.logger.error(`🔥 [FIREBASE] Sync/Notify Failed: ${err.message}`);
+    }
+
     // REALTIME EMIT
     this.logger.log(`📡 EMITTING TO OFFICERS: ${newSOS.id}`);
     this.gateway.emitNewEmergency(newSOS);
@@ -51,8 +78,57 @@ export class EmergencyService {
       
       this.logger.log(`✅ Incident Updated: ${id} to ${status}`);
       
+      // FIREBASE SYNC
+      try {
+        const db = this.firebase.getFirestore();
+        if (db) {
+          await db.collection('emergencies').doc(id).update({
+            status,
+            ...officerData,
+            updatedAt: new Date().toISOString(),
+          });
+          this.logger.log(`🔥 [FIREBASE] Update Success: ${id}`);
+        }
+
+        // NOTIFY CITIZEN
+        if (['assigned', 'enroute', 'arrived'].includes(status)) {
+          const incident = this.sosComplaints[index];
+          await this.firebase.sendPushNotification(
+            incident.citizenId, // Ideally an FCM token stored in DB
+            '🚔 OFFICER UPDATE',
+            `Officer is ${status === 'assigned' ? 'responding' : status === 'enroute' ? 'on the way' : 'arrived'}.`,
+            { incidentId: id, status }
+          );
+        }
+      } catch (err) {
+        this.logger.error(`🔥 [FIREBASE] Update Failed: ${err.message}`);
+      }
+
       // REALTIME UPDATE EMIT
       this.gateway.emitUpdate(this.sosComplaints[index]);
+
+      // ANALYTICS LOGGING
+      if (status === 'completed' || status === 'resolved') {
+        const incident = this.sosComplaints[index];
+        const durationMs = Date.now() - incident.timestamp;
+        const durationMin = (durationMs / 60000).toFixed(2);
+        
+        try {
+          const db = this.firebase.getFirestore();
+          if (db) {
+            await db.collection('system_analytics').add({
+              incidentId: id,
+              type: incident.emergencyType,
+              durationMin,
+              officerId: officerData?.assignedOfficerId,
+              timestamp: new Date().toISOString(),
+            });
+            this.logger.log(`📊 [ANALYTICS] Incident ${id} resolved in ${durationMin} min`);
+          }
+        } catch (err) {
+          this.logger.error(`📊 [ANALYTICS] Logging failed: ${err.message}`);
+        }
+      }
       
       return this.sosComplaints[index];
     }

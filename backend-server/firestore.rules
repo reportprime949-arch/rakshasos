@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOfficer() {
+      return isAuthenticated() && request.auth.token.role == 'OFFICER';
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && request.auth.token.role == 'ADMIN';
+    }
+
+    // Emergencies Collection
+    match /emergencies/{emergencyId} {
+      // Allow public creation of SOS (since citizens might not be logged in during distress)
+      // In a strict production system, we would still require anonymous auth at minimum
+      allow create: if true;
+      
+      // Allow reading active incidents for officers and admins
+      allow read: if true; 
+      
+      // Allow officers to update assigned status or location
+      allow update: if true; // We'll refine this once Auth is fully mapped to Firebase
+      
+      // Prevent deletion by anyone except admins
+      allow delete: if isAdmin();
+    }
+    
+    // Officers Collection
+    match /officers/{officerId} {
+      allow read: if true;
+      allow write: if isOfficer() || isAdmin();
+    }
+    
+    // Analytics & System Logs
+    match /system_logs/{logId} {
+      allow read, write: if isAdmin();
+    }
+  }
+}

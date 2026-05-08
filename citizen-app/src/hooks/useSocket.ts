@@ -11,12 +11,26 @@ export const useSocket = (token?: string) => {
     console.log('🔌 [CITIZEN SOCKET] Connecting to:', API_URL);
 
     const socket = io(API_URL, {
-      transports: ['websocket'],
+      transports: ['websocket', 'polling'],
       reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
     });
 
     socket.on('connect', () => {
       console.log('✅ [CITIZEN SOCKET] Connected:', socket.id);
+    });
+
+    socket.on('officer_location_update', (data) => {
+      const currentId = useEmergencyStore.getState().id;
+      if (data.id === currentId || data.citizenId === 'CIT-12345') { // Match ID or citizenId
+        console.log('🛰️ [OFFICER MOVED] New Coords:', data.lat, data.lng);
+        assignOfficer({
+          ...useEmergencyStore.getState().officer!,
+          lat: data.lat,
+          lng: data.lng,
+        });
+      }
     });
 
     socket.on('emergency:update', (data) => {
