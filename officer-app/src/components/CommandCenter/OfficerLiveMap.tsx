@@ -55,6 +55,8 @@ interface MapProps {
   officerLoc: { lat: number; lng: number } | null;
   citizenLoc: { lat: number; lng: number; latitude?: number; longitude?: number } | null;
   active: boolean;
+  incidents?: any[];
+  activeDispatch?: any | null;
 }
 
 function MapController({ officerLoc, citizenLoc, active }: MapProps) {
@@ -64,18 +66,18 @@ function MapController({ officerLoc, citizenLoc, active }: MapProps) {
     if (active && officerLoc && citizenLoc) {
       const bounds = L.latLngBounds([
         [officerLoc.lat, officerLoc.lng],
-        [citizenLoc.lat, citizenLoc.lng]
+        [citizenLoc.latitude || citizenLoc.lat, citizenLoc.longitude || citizenLoc.lng]
       ]);
       map.fitBounds(bounds, { padding: [120, 120], animate: true, duration: 2 });
     } else if (officerLoc) {
       map.setView([officerLoc.lat, officerLoc.lng], 14, { animate: true });
     }
-  }, [officerLoc?.lat, officerLoc?.lng, citizenLoc?.lat, citizenLoc?.lng, active, map]);
+  }, [officerLoc?.lat, officerLoc?.lng, citizenLoc?.lat, citizenLoc?.lng, citizenLoc?.latitude, citizenLoc?.longitude, active, map]);
 
   return null;
 }
 
-const OfficerLiveMap = ({ officerLoc, citizenLoc, active }: MapProps) => {
+const OfficerLiveMap = ({ officerLoc, citizenLoc, active, incidents = [], activeDispatch = null }: MapProps) => {
   const [routes, setRoutes] = useState<any[]>([]);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [currentBlock, setCurrentBlock] = useState("LOCATING...");
@@ -212,11 +214,27 @@ const OfficerLiveMap = ({ officerLoc, citizenLoc, active }: MapProps) => {
           </Marker>
         )}
 
-        {/* INCIDENT TARGET */}
-        {active && citizenLoc && (
+        {/* ALL ACTIVE INCIDENTS */}
+        {incidents.map((incident: any) => (
+          <Marker 
+            key={incident.id} 
+            position={[
+              incident.latitude || incident.location?.lat || incident.lat || 0, 
+              incident.longitude || incident.location?.lng || incident.lng || 0
+            ]} 
+            icon={incidentIcon}
+          >
+            <Tooltip permanent direction="top" offset={[0, -25]} className="!bg-transparent !border-none !shadow-none !text-red-500 font-black text-[8px] tracking-[0.3em] uppercase italic">
+              {incident.id === activeDispatch?.id ? 'ACTIVE DISPATCH' : 'PENDING SOS'}
+            </Tooltip>
+          </Marker>
+        ))}
+
+        {/* ACTIVE DISPATCH (If not in incidents list) */}
+        {active && citizenLoc && !incidents.find(i => i.id === activeDispatch?.id) && (
           <Marker position={[citizenLoc.latitude || citizenLoc.lat, citizenLoc.longitude || citizenLoc.lng]} icon={incidentIcon}>
             <Tooltip permanent direction="top" offset={[0, -25]} className="!bg-transparent !border-none !shadow-none !text-red-500 font-black text-[8px] tracking-[0.3em] uppercase italic">
-              INCIDENT LOCATION
+              ACTIVE DISPATCH
             </Tooltip>
           </Marker>
         )}

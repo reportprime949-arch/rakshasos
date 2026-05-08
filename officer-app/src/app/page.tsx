@@ -193,6 +193,16 @@ export default function OfficerHome() {
     console.log('👆 [ACCEPT BUTTON CLICKED]', id);
     setIsAccepting(true);
     
+    // Find incident and set as active dispatch
+    const incident = activeIncidents.find(i => i.id === id);
+    if (incident) {
+      setDispatch({
+        ...incident,
+        lat: incident.latitude || incident.location?.lat || incident.lat || 0,
+        lng: incident.longitude || incident.location?.lng || incident.lng || 0,
+      });
+    }
+
     console.log('INCIDENT ACCEPTED', id);
     emitAccept(id, officerId);
     
@@ -444,6 +454,8 @@ export default function OfficerHome() {
           officerLoc={location} 
           citizenLoc={activeDispatch ? { lat: activeDispatch.lat, lng: activeDispatch.lng } : null}
           active={!!activeDispatch}
+          incidents={activeIncidents}
+          activeDispatch={activeDispatch}
         />
 
         {/* Location Permission Modal */}
