@@ -1,40 +1,52 @@
 import { useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useEmergencyStore } from '@/store/useEmergencyStore';
+import { SOCKET_URL } from '@/lib/api';
 
 export const useSocket = (token?: string) => {
   const socketRef = useRef<Socket | null>(null);
-  const { id, updateStatus, assignOfficer } = useEmergencyStore();
+  const { updateStatus, assignOfficer } = useEmergencyStore();
 
   useEffect(() => {
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com';
-    console.log('🔌 [CITIZEN SOCKET] Connecting to:', API_URL);
+    console.log('🔌 [CITIZEN SOCKET] Connecting to:', SOCKET_URL);
 
-    const socket = io(API_URL, {
+    const socket = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
     });
 
     socket.on('connect', () => {
       console.log('✅ [CITIZEN SOCKET] Connected:', socket.id);
     });
 
+    socket.on('connect_error', (err) => {
+      console.warn('⚠️ [CITIZEN SOCKET] Connection error:', err.message);
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.warn('❌ [CITIZEN SOCKET] Disconnected:', reason);
+    });
+
     socket.on('officer_location_update', (data) => {
       const currentId = useEmergencyStore.getState().id;
-      if (data.id === currentId || data.citizenId === 'CIT-12345') { // Match ID or citizenId
+      if (data.id === currentId || data.citizenId === 'CIT-12345') {
         console.log('🛰️ [OFFICER MOVED] New Coords:', data.lat, data.lng);
-        assignOfficer({
-          ...useEmergencyStore.getState().officer!,
-          lat: data.lat,
-          lng: data.lng,
-        });
+        const currentOfficer = useEmergencyStore.getState().officer;
+        if (currentOfficer) {
+          assignOfficer({
+            ...currentOfficer,
+            lat: data.lat,
+            lng: data.lng,
+          });
+        }
       }
     });
 
     socket.on('emergency:update', (data) => {
-      // Use get() or check store state if needed, but 'id' from dependency is fine
       const currentId = useEmergencyStore.getState().id;
       if (data.id === currentId) {
         console.log('🔄 [CITIZEN REALTIME] Status Update:', data.status);
@@ -45,8 +57,8 @@ export const useSocket = (token?: string) => {
             name: data.officerName || 'Officer Response Team',
             badge: data.officerBadge || 'OFF-9921',
             phone: data.officerPhone || '+1 555-0123',
-            lat: data.location.lat,
-            lng: data.location.lng,
+            lat: data.location?.lat || 0,
+            lng: data.location?.lng || 0,
             eta: '4 Min',
           });
         }

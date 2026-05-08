@@ -15,8 +15,21 @@ export class EmergencyController {
 
   @Post()
   async createSOS(@Body() body: { citizenName: string; emergencyType: string; location: { lat: number; lng: number } }) {
-    this.logger.log(`🚨 Incoming SOS from ${body.citizenName}`);
-    return this.emergencyService.createSOS(body);
+    try {
+      this.logger.log(`🚨 SOS RECEIVED from ${body.citizenName}`);
+      const result = await this.emergencyService.createSOS(body);
+      return {
+        success: true,
+        message: 'Emergency alert sent',
+        ...result,
+      };
+    } catch (error) {
+      this.logger.error('❌ SOS FAILED:', error);
+      return {
+        success: false,
+        error: 'Server error',
+      };
+    }
   }
 
   @Patch(':id')

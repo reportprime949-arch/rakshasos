@@ -1,8 +1,8 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 import { db } from '@/lib/firebase';
-import { doc, setDoc, onSnapshot, serverTimestamp, collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, collection, getDocs, query, where } from 'firebase/firestore';
 import { calculateDistance } from '@/utils/distance';
+import { API_URL, safeFetch } from '@/lib/api';
 
 export type EmergencyStatus = 
   | 'IDLE'
@@ -33,7 +33,7 @@ interface EmergencyState {
   
   // Actions
   startCountdown: () => void;
-  triggerSOS: (citizenName: string, citizenId: string) => Promise<void>;
+  triggerSOS: (citizenName: string, citizenId: string) => Promise<any>;
   setLocation: (location: { lat: number; lng: number }) => void;
   updateStatus: (status: EmergencyStatus) => void;
   assignOfficer: (officer: any) => void;
@@ -42,133 +42,167 @@ interface EmergencyState {
   reset: () => void;
 }
 
-export const useEmergencyStore = create<EmergencyState>()(
-  persist(
-    (set, get) => ({
-      id: null,
-      status: 'IDLE',
-      startTime: null,
-      location: null,
-      lastGPSUpdate: 0,
-      officer: null,
-      error: null,
+// Terminal states — polling must stop when we reach these
+const TERMINAL_STATUSES: EmergencyStatus[] = ['IDLE', 'COMPLETED', 'CANCELLED'];
 
-      reset: () => set({ 
+export const useEmergencyStore = create<EmergencyState>()(
+  (set, get) => ({
+    id: null,
+    status: 'IDLE',
+    startTime: null,
+    location: null,
+    lastGPSUpdate: 0,
+    officer: null,
+    error: null,
+
+    reset: () => {
+      console.log('🧹 [CITIZEN RESET] Clearing all emergency state');
+      try {
+        localStorage.removeItem('rakshasos-emergency-session');
+        localStorage.removeItem('activeSOS');
+        localStorage.removeItem('activeEmergency');
+        sessionStorage.clear();
+      } catch { /* SSR guard */ }
+      set({ 
         id: null, 
         status: 'IDLE', 
         officer: null, 
         location: null, 
         startTime: null,
         error: null 
-      }),
+      });
+    },
 
-      startCountdown: () => set({ status: 'COUNTDOWN' }),
+    startCountdown: () => set({ status: 'COUNTDOWN' }),
 
-      assignOfficer: (officer) => set({ officer, status: 'ASSIGNED' }),
+    assignOfficer: (officer) => set({ officer, status: 'ASSIGNED' }),
 
-      triggerSOS: async (citizenName, citizenId) => {
-        const id = `SOS-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-        const startTime = Date.now();
-        
-        console.log('🚨 TRIGGERING SOS:', id);
+    triggerSOS: async (citizenName, citizenId) => {
+      const startTime = Date.now();
+      const currentLocation = get().location;
 
-        const currentLocation = get().location;
+      const payload = {
+        citizenId,
+        citizenName,
+        emergencyType: 'SOS Triggered',
+        location: currentLocation || { lat: 0, lng: 0 },
+        lat: currentLocation?.lat || 0,
+        lng: currentLocation?.lng || 0,
+      };
+      
+      console.log('🚨 [SOS] Triggering emergency to:', `${API_URL}/api/emergency`);
+      console.log('📡 [API REQUEST]: POST /api/emergency', payload);
 
-        try {
-          const payload = {
-            citizenId,
-            citizenName,
-            emergencyType: 'SOS Triggered',
-            location: currentLocation || { lat: 0, lng: 0 },
-            lat: currentLocation?.lat || 0,
-            lng: currentLocation?.lng || 0,
-          };
-          
-          console.log('📡 [API REQUEST]: POST /api/emergency', payload);
+      const result = await safeFetch(`${API_URL}/api/emergency`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
 
-          const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/emergency`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-
-          const data = await response.json();
-          console.log('📥 [API RESPONSE]:', data);
-
-          set({
-            id: data.id,
-            status: 'SEARCHING',
-            startTime,
-            officer: null,
-            error: null
-          });
-
-        } catch (error) {
-          console.error('🔴 SOS CREATION FAILED:', error);
-          set({ error: 'Failed to connect to command center.' });
-        }
-      },
-
-      setLocation: async (location) => {
-        set({ location });
-      },
-
-      updateStatus: (status) => set({ status }),
-
-      cancelEmergency: async () => {
-        const id = get().id;
-        if (id) {
-          try {
-            await setDoc(doc(db, 'emergencies', id), {
-              status: 'CANCELLED',
-              updatedAt: serverTimestamp(),
-            }, { merge: true });
-          } catch (e) {}
-        }
-        get().reset();
-      },
-
-      syncWithFirestore: () => {
-        const id = get().id;
-        if (!id) return () => {};
-
-        console.log('📡 SYNCING WITH API (Polling):', id);
-
-        const interval = setInterval(async () => {
-          try {
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/emergency/${id}`);
-            const data = await response.json();
-
-            if (data && data.status) {
-              if (data.status === 'assigned' || data.status === 'enroute' || data.status === 'arrived') {
-                set({
-                  status: data.status.toUpperCase() as EmergencyStatus,
-                  officer: {
-                    id: 'OFF-123',
-                    name: 'Officer Response Team',
-                    badge: 'OFF-9921',
-                    phone: '+1 555-0123',
-                    lat: data.location.lat + 0.005, // Mock officer movement
-                    lng: data.location.lng + 0.005,
-                    eta: '4 Min',
-                  }
-                });
-              } else if (data.status === 'resolved') {
-                set({ status: 'COMPLETED' });
-              }
-            }
-          } catch (error) {
-            console.error('Polling error:', error);
-          }
-        }, 3000);
-
-        return () => clearInterval(interval);
+      if (result?.success === false) {
+        console.error('🔴 [SOS] Creation failed:', result.error);
+        set({ error: result.error || 'Failed to connect to command center.' });
+        return result;
       }
-    }),
-    {
-      name: 'rakshasos-emergency-session',
+
+      const data = result;
+      console.log('📥 [API RESPONSE]:', data);
+      set({
+        id: data.id,
+        status: 'SEARCHING',
+        startTime,
+        officer: null,
+        error: null,
+      });
+      return data;
+    },
+
+    setLocation: (location) => {
+      set({ location });
+    },
+
+    updateStatus: (status) => set({ status }),
+
+    cancelEmergency: async () => {
+      const id = get().id;
+      if (id) {
+        try {
+          await setDoc(doc(db, 'emergencies', id), {
+            status: 'CANCELLED',
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+        } catch { /* ignore */ }
+      }
+      console.log('🚫 [CITIZEN MODAL CLOSED] Emergency cancelled');
+      get().reset();
+    },
+
+    syncWithFirestore: () => {
+      const id = get().id;
+      if (!id) {
+        console.log('⚠️ [CITIZEN SYNC] No active SOS ID — skipping polling');
+        return () => {};
+      }
+
+      console.log('📡 [CITIZEN SYNC] Starting polling for:', id);
+
+      const interval = setInterval(async () => {
+        const currentStatus = get().status;
+
+        // Stop polling if we've reached a terminal state
+        if (TERMINAL_STATUSES.includes(currentStatus)) {
+          console.log('🛑 [CITIZEN SYNC] Terminal state reached, stopping polling:', currentStatus);
+          clearInterval(interval);
+          return;
+        }
+
+        const { ok, data, status } = await safeFetch(`${API_URL}/api/emergency/${id}`);
+
+        if (!ok) {
+          if (status === 404) {
+            console.log('🧹 [CITIZEN RESET] Emergency not found on backend — resetting');
+            get().reset();
+            clearInterval(interval);
+          }
+          return;
+        }
+
+        if (!data || !data.status) {
+          console.log('🧹 [CITIZEN RESET] Empty API response — closing modal');
+          get().reset();
+          clearInterval(interval);
+          return;
+        }
+
+        if (data.status === 'resolved' || data.status === 'cancelled') {
+          console.log('🛑 [CITIZEN SYNC] Backend reports resolved/cancelled — completing');
+          set({ status: data.status === 'resolved' ? 'COMPLETED' : 'CANCELLED' });
+          clearInterval(interval);
+          return;
+        }
+
+        if (data.status === 'assigned' || data.status === 'enroute' || data.status === 'arrived') {
+          console.log('🚔 [CITIZEN ACTIVE SOS FOUND] Officer responding:', data.status);
+          set({
+            status: data.status.toUpperCase() as EmergencyStatus,
+            officer: {
+              id: data.assignedOfficerId || 'OFF-123',
+              name: data.officerName || 'Officer Response Team',
+              badge: data.officerBadge || 'OFF-9921',
+              phone: '+1 555-0123',
+              lat: data.officerLat || (data.location?.lat || 0) + 0.005,
+              lng: data.officerLng || (data.location?.lng || 0) + 0.005,
+              eta: '4 Min',
+            }
+          });
+        }
+      }, 3000);
+
+      return () => {
+        console.log('🛑 [CITIZEN SYNC] Cleanup — clearing polling interval');
+        clearInterval(interval);
+      };
     }
-  )
+  })
 );
 
 // Helper function for assignment logic
@@ -181,8 +215,8 @@ async function findAndAssignOfficer(emergencyId: string, location: { lat: number
     let closestOfficer: any = null;
     let minDistance = Infinity;
 
-    querySnapshot.forEach((doc) => {
-      const officer = doc.data();
+    querySnapshot.forEach((docSnap) => {
+      const officer = docSnap.data();
       const dist = calculateDistance(
         location.lat,
         location.lng,
@@ -192,7 +226,7 @@ async function findAndAssignOfficer(emergencyId: string, location: { lat: number
       
       if (dist < minDistance && dist <= 3) {
         minDistance = dist;
-        closestOfficer = { id: doc.id, ...officer };
+        closestOfficer = { id: docSnap.id, ...officer };
       }
     });
 

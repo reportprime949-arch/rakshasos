@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Shield, X, MapPin, Navigation, Phone, AlertCircle, CheckCircle, Zap, AlertTriangle, Activity } from 'lucide-react';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { useEmergencyStore } from '@/store/useEmergencyStore';
 import { StatusTimeline } from '@/components/emergency/StatusTimeline';
@@ -26,13 +27,36 @@ export default function CitizenHome() {
     setLocation,
     cancelEmergency 
   } = useEmergencyStore();
+  const router = useRouter();
 
   const [countdown, setCountdown] = useState(3);
   
   // Connect to realtime server
-  // In a real app, the token would come from auth
   const socket = useSocket('citizen-test-token');
 
+  // === CRITICAL: Purge stale emergency state on mount ===
+  // The old store used zustand/persist which saved SOS state to localStorage.
+  // On page load, we must guarantee IDLE state unless the user presses SOS.
+  useEffect(() => {
+    // Remove any leftover persistence keys from previous sessions
+    try {
+      localStorage.removeItem('rakshasos-emergency-session');
+      localStorage.removeItem('activeSOS');
+      localStorage.removeItem('activeEmergency');
+    } catch { /* SSR guard */ }
+
+    // If the store somehow loaded with a non-IDLE status (shouldn't happen
+    // now that persist is removed, but this is a safety net), force reset.
+    const currentStatus = useEmergencyStore.getState().status;
+    if (currentStatus !== 'IDLE') {
+      console.log('🧹 [CITIZEN RESET] Stale state found on mount:', currentStatus, '— forcing IDLE');
+      useEmergencyStore.getState().reset();
+    } else {
+      console.log('✅ [CITIZEN] App loaded cleanly in IDLE state');
+    }
+  }, []);
+
+  // Countdown timer for SOS activation
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (status === 'COUNTDOWN') {
@@ -40,26 +64,43 @@ export default function CitizenHome() {
         if (window.navigator.vibrate) window.navigator.vibrate(50);
         timer = setTimeout(() => setCountdown(prev => prev - 1), 1000);
       } else {
-        // Trigger Firestore SOS
-        triggerSOS('Test Citizen', 'CIT-12345');
-        requestPermission();
+        const handleSOS = async () => {
+          try {
+             const result = await triggerSOS('Test Citizen', 'CIT-12345');
+             requestPermission();
+          
+             if (result?.success) {
+                router.push("/alert-sent");
+             } else {
+                router.push("/network-error");
+             }
+          } catch (err) {
+             console.error(err);
+             router.push("/network-error");
+          }
+        };
+        handleSOS();
       }
     } else {
       setCountdown(3);
     }
     return () => clearTimeout(timer);
-  }, [status, countdown, triggerSOS, requestPermission]);
+  }, [status, countdown, triggerSOS, requestPermission, router]);
 
+  // Start polling when an active SOS exists
   useEffect(() => {
     if (id) {
+      console.log('📡 [CITIZEN] Active SOS detected, starting sync:', id);
       const unsub = useEmergencyStore.getState().syncWithFirestore();
       return () => unsub();
     }
   }, [id]);
 
+  // Sync GPS coordinates to store
   useEffect(() => {
     if (coords) setLocation({ lat: coords.latitude, lng: coords.longitude });
   }, [coords, setLocation]);
+
 
   return (
     <main className={`min-h-screen transition-colors duration-1000 flex flex-col overflow-hidden ${
