@@ -75,7 +75,7 @@ export const useEmergencyStore = create<EmergencyState>()(
         const currentLocation = get().location;
 
         try {
-          const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/emergency/sos`, {
+          const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/emergency`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -128,7 +128,7 @@ export const useEmergencyStore = create<EmergencyState>()(
 
         const interval = setInterval(async () => {
           try {
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/emergency/sos/${id}`);
+            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/emergency/${id}`);
             const data = await response.json();
 
             if (data && data.status) {
