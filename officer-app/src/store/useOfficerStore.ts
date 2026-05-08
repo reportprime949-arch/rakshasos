@@ -5,6 +5,8 @@ export type DispatchAlert = {
   citizenName: string;
   lat: number;
   lng: number;
+  latitude?: number;
+  longitude?: number;
   description: string;
   status: string;
   emergencyType?: string;

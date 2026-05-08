@@ -79,15 +79,41 @@ export const useEmergencyStore = create<EmergencyState>()(
 
     triggerSOS: async (citizenName, citizenId) => {
       const startTime = Date.now();
-      const currentLocation = get().location;
+      let latitude = 0;
+      let longitude = 0;
+
+      // Request fresh GPS coordinates
+      try {
+        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+          if (!navigator.geolocation) {
+            reject(new Error('Geolocation not supported'));
+            return;
+          }
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0
+          });
+        });
+        latitude = position.coords.latitude;
+        longitude = position.coords.longitude;
+        console.log("LAT:", latitude);
+        console.log("LNG:", longitude);
+      } catch (err) {
+        console.error("⚠️ [GPS FAILED] Using fallback/store coords:", err);
+        const storeLocation = get().location;
+        latitude = storeLocation?.lat || 0;
+        longitude = storeLocation?.lng || 0;
+      }
 
       const payload = {
         citizenId,
         citizenName,
         emergencyType: 'SOS Triggered',
-        location: currentLocation || { lat: 0, lng: 0 },
-        lat: currentLocation?.lat || 0,
-        lng: currentLocation?.lng || 0,
+        latitude,
+        longitude,
+        location: { lat: latitude, lng: longitude }, // Backward compatibility
+        timestamp: Date.now(),
       };
       
       console.log('🚨 [SOS] Triggering emergency to:', `${API_URL}/api/emergency`);
@@ -110,6 +136,7 @@ export const useEmergencyStore = create<EmergencyState>()(
         id: data.id,
         status: 'SEARCHING',
         startTime,
+        location: { lat: latitude, lng: longitude },
         officer: null,
         error: null,
       });

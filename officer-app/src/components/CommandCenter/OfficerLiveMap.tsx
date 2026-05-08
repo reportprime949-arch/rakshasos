@@ -53,7 +53,7 @@ const incidentIcon = L.divIcon({
 
 interface MapProps {
   officerLoc: { lat: number; lng: number } | null;
-  citizenLoc: { lat: number; lng: number } | null;
+  citizenLoc: { lat: number; lng: number; latitude?: number; longitude?: number } | null;
   active: boolean;
 }
 
@@ -214,7 +214,7 @@ const OfficerLiveMap = ({ officerLoc, citizenLoc, active }: MapProps) => {
 
         {/* INCIDENT TARGET */}
         {active && citizenLoc && (
-          <Marker position={[citizenLoc.lat, citizenLoc.lng]} icon={incidentIcon}>
+          <Marker position={[citizenLoc.latitude || citizenLoc.lat, citizenLoc.longitude || citizenLoc.lng]} icon={incidentIcon}>
             <Tooltip permanent direction="top" offset={[0, -25]} className="!bg-transparent !border-none !shadow-none !text-red-500 font-black text-[8px] tracking-[0.3em] uppercase italic">
               INCIDENT LOCATION
             </Tooltip>

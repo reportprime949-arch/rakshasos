@@ -14,7 +14,7 @@ export class EmergencyController {
   }
 
   @Post()
-  async createSOS(@Body() body: { citizenName: string; emergencyType: string; location: { lat: number; lng: number } }) {
+  async createSOS(@Body() body: { citizenName: string; emergencyType: string; latitude: number; longitude: number; location: { lat: number; lng: number } }) {
     try {
       this.logger.log(`🚨 SOS RECEIVED from ${body.citizenName}`);
       const result = await this.emergencyService.createSOS(body);

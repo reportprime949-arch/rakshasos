@@ -97,8 +97,8 @@ export default function OfficerHome() {
         setDispatch({
           id: assigned.id,
           citizenName: assigned.citizenName,
-          lat: assigned.location.lat,
-          lng: assigned.location.lng,
+          lat: assigned.latitude || assigned.location?.lat || 0,
+          lng: assigned.longitude || assigned.location?.lng || 0,
           description: assigned.description || 'Emergency SOS',
           status: assigned.status
         });

@@ -15,15 +15,20 @@ export class EmergencyService {
     private readonly firebase: FirebaseService,
   ) {}
 
-  async createSOS(data: { citizenName?: string; citizenId?: string; emergencyType: string; location: { lat: number; lng: number } }) {
+  async createSOS(data: { citizenName?: string; citizenId?: string; emergencyType: string; latitude?: number; longitude?: number; location?: { lat: number; lng: number } }) {
+    const lat = data.latitude ?? data.location?.lat ?? 0;
+    const lng = data.longitude ?? data.location?.lng ?? 0;
+
     const newSOS = {
       id: `SOS-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
       citizenId: data.citizenId || 'anonymous',
       citizenName: data.citizenName || 'Unknown Citizen',
       emergencyType: data.emergencyType,
-      location: data.location,
-      lat: data.location.lat,
-      lng: data.location.lng,
+      location: { lat, lng },
+      latitude: lat,
+      longitude: lng,
+      lat,
+      lng,
       createdAt: new Date().toISOString(),
       timestamp: Date.now(),
       status: 'pending',
