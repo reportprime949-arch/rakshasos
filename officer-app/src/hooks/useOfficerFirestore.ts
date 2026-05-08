@@ -19,7 +19,7 @@ export const useOfficerFirestore = (currentLocation: { lat: number; lng: number 
 
     const pollInterval = setInterval(async () => {
       try {
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/sos`);
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/emergency/list`);
         const allIncidents = await response.json();
         
         console.log(`📥 [INCIDENT UPDATE] Fetched ${allIncidents.length} complaints`);
@@ -73,7 +73,7 @@ export const useOfficerFirestore = (currentLocation: { lat: number; lng: number 
   const acceptEmergency = async (id: string) => {
     console.log('👆 [OFFICER ACTION] Accept Button Clicked:', id);
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/sos/${id}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/emergency/sos/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
