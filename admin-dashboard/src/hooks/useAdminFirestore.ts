@@ -7,24 +7,28 @@ export const useAdminFirestore = () => {
   const { setEmergencies, updateEmergency } = useAdminStore();
 
   useEffect(() => {
-    const q = query(
-      collection(db, 'emergencies'),
-      orderBy('createdAt', 'desc'),
-      limit(50)
-    );
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/emergency`);
+        const emergencies = await response.json();
+        
+        const mapped = emergencies.map((e: any) => ({
+          id: e.id,
+          citizenName: e.citizenName,
+          status: e.status.toUpperCase(),
+          lat: e.location.lat,
+          lng: e.location.lng,
+          createdAt: e.createdAt,
+          emergencyType: e.emergencyType,
+        }));
+        
+        setEmergencies(mapped);
+      } catch (error) {
+        console.error('Admin polling error:', error);
+      }
+    }, 3000);
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const emergencies = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate()?.toISOString() || new Date().toISOString(),
-        updatedAt: doc.data().updatedAt?.toDate()?.toISOString() || new Date().toISOString(),
-      }));
-      
-      setEmergencies(emergencies);
-    });
-
-    return () => unsubscribe();
+    return () => clearInterval(pollInterval);
   }, [setEmergencies]);
 
   useEffect(() => {
