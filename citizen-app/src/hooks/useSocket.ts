@@ -4,50 +4,50 @@ import { useEmergencyStore } from '@/store/useEmergencyStore';
 
 export const useSocket = (token?: string) => {
   const socketRef = useRef<Socket | null>(null);
-  const { updateStatus, assignOfficer } = useEmergencyStore();
+  const { id, updateStatus, assignOfficer } = useEmergencyStore();
 
   useEffect(() => {
-    if (!token) return;
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com';
+    console.log('🔌 [CITIZEN SOCKET] Connecting to:', API_URL);
 
-    const socket = io(process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com', {
-      auth: { token },
-      extraHeaders: {
-        Authorization: `Bearer ${token}`
-      }
+    const socket = io(API_URL, {
+      transports: ['websocket'],
+      reconnection: true,
     });
 
     socket.on('connect', () => {
-      console.log('Connected to dispatch server');
+      console.log('✅ [CITIZEN SOCKET] Connected:', socket.id);
     });
 
-    socket.on('officer_dispatched', (data) => {
-      console.log('Officer Dispatched:', data);
-      // Data would contain officer info
-      assignOfficer({
-        name: data.officerName || 'Officer Assigned',
-        badge: data.badge || 'B-000',
-        phone: data.phone || '',
-        lat: data.lat,
-        lng: data.lng,
-        eta: 'Calculating...',
-      });
-    });
-
-    socket.on('status_update', (data) => {
-      updateStatus(data.status);
-    });
-
-    socket.on('officer_location_update', (data) => {
-      // Update officer location in store
-      // This would require an action in useEmergencyStore to update officer position
+    socket.on('emergency:update', (data) => {
+      // Use get() or check store state if needed, but 'id' from dependency is fine
+      const currentId = useEmergencyStore.getState().id;
+      if (data.id === currentId) {
+        console.log('🔄 [CITIZEN REALTIME] Status Update:', data.status);
+        
+        if (data.status === 'assigned' || data.status === 'enroute' || data.status === 'arrived') {
+          assignOfficer({
+            id: data.officerId || 'OFF-123',
+            name: data.officerName || 'Officer Response Team',
+            badge: data.officerBadge || 'OFF-9921',
+            phone: data.officerPhone || '+1 555-0123',
+            lat: data.location.lat,
+            lng: data.location.lng,
+            eta: '4 Min',
+          });
+        }
+        
+        updateStatus(data.status.toUpperCase());
+      }
     });
 
     socketRef.current = socket;
 
     return () => {
+      console.log('🔌 [CITIZEN SOCKET] Disconnecting...');
       socket.disconnect();
     };
-  }, [token, updateStatus, assignOfficer]);
+  }, [updateStatus, assignOfficer]);
 
   return socketRef.current;
 };

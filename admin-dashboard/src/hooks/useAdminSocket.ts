@@ -7,23 +7,40 @@ export const useAdminSocket = (token?: string) => {
   const { addEmergency, updateEmergency, updateOfficerLocation } = useAdminStore();
 
   useEffect(() => {
-    if (!token) return;
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com';
+    console.log('🔌 [ADMIN SOCKET] Connecting to:', API_URL);
 
-    const socket = io(process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com', {
-      auth: { token },
+    const socket = io(API_URL, {
+      transports: ['websocket'],
+      reconnection: true,
     });
 
-    socket.on('emergency.created', (data) => {
-      console.log('New Emergency Incident:', data);
-      addEmergency(data);
+    socket.on('connect', () => {
+      console.log('✅ [ADMIN SOCKET] Connected:', socket.id);
     });
 
-    socket.on('responder.assigned', (data) => {
-      updateEmergency(data);
+    socket.on('emergency:new', (data) => {
+      console.log('🚨 [ADMIN] NEW SOS RECEIVED:', data);
+      const mappedData = {
+        ...data,
+        status: data.status.toUpperCase(),
+        lat: data.location.lat,
+        lng: data.location.lng,
+      };
+      addEmergency(mappedData);
+      window.dispatchEvent(new CustomEvent('new-incident', { detail: mappedData }));
     });
 
-    socket.on('emergency.resolved', (data) => {
-      updateEmergency(data);
+    socket.on('emergency:update', (data) => {
+      console.log('🔄 [ADMIN] SOS UPDATED:', data);
+      const mappedData = {
+        ...data,
+        status: data.status.toUpperCase(),
+        lat: data.location.lat,
+        lng: data.location.lng,
+      };
+      updateEmergency(mappedData);
+      window.dispatchEvent(new CustomEvent('incident-updated', { detail: mappedData }));
     });
 
     socket.on('officer_moved', (data) => {
@@ -33,9 +50,10 @@ export const useAdminSocket = (token?: string) => {
     socketRef.current = socket;
 
     return () => {
+      console.log('🔌 [ADMIN SOCKET] Disconnecting...');
       socket.disconnect();
     };
-  }, [token, addEmergency, updateEmergency, updateOfficerLocation]);
+  }, [addEmergency, updateEmergency, updateOfficerLocation]);
 
   return socketRef.current;
 };

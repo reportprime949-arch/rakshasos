@@ -4,7 +4,7 @@ import { collection, query, onSnapshot, orderBy, limit, where } from 'firebase/f
 import { useAdminStore } from '@/store/useAdminStore';
 
 export const useAdminFirestore = () => {
-  const { setEmergencies, updateEmergency } = useAdminStore();
+  const { setEmergencies, addEmergency, updateEmergency } = useAdminStore();
 
   useEffect(() => {
     const pollInterval = setInterval(async () => {
@@ -29,6 +29,27 @@ export const useAdminFirestore = () => {
     }, 3000);
 
     return () => clearInterval(pollInterval);
+  }, [setEmergencies]);
+
+  useEffect(() => {
+    const handleNewIncident = (event: any) => {
+      const data = event.detail;
+      console.log('🚨 [ADMIN IMMEDIATE] New SOS:', data.id);
+      addEmergency(data);
+    };
+
+    const handleIncidentUpdate = (event: any) => {
+      const data = event.detail;
+      console.log('🔄 [ADMIN IMMEDIATE] SOS Updated:', data.id);
+      updateEmergency(data);
+    };
+
+    window.addEventListener('new-incident', handleNewIncident);
+    window.addEventListener('incident-updated', handleIncidentUpdate);
+    return () => {
+      window.removeEventListener('new-incident', handleNewIncident);
+      window.removeEventListener('incident-updated', handleIncidentUpdate);
+    };
   }, [setEmergencies]);
 
   useEffect(() => {

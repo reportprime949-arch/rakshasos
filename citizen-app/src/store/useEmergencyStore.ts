@@ -75,17 +75,25 @@ export const useEmergencyStore = create<EmergencyState>()(
         const currentLocation = get().location;
 
         try {
+          const payload = {
+            citizenId,
+            citizenName,
+            emergencyType: 'SOS Triggered',
+            location: currentLocation || { lat: 0, lng: 0 },
+            lat: currentLocation?.lat || 0,
+            lng: currentLocation?.lng || 0,
+          };
+          
+          console.log('📡 [API REQUEST]: POST /api/emergency', payload);
+
           const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/emergency`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              citizenName,
-              emergencyType: 'SOS Triggered',
-              location: currentLocation || { lat: 0, lng: 0 }
-            })
+            body: JSON.stringify(payload)
           });
 
           const data = await response.json();
+          console.log('📥 [API RESPONSE]:', data);
 
           set({
             id: data.id,

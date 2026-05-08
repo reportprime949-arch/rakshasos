@@ -21,6 +21,7 @@ import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { useOfficerStore } from '@/store/useOfficerStore';
 import { useOfficerFirestore } from '@/hooks/useOfficerFirestore';
 import { useOfficerLocation } from '@/hooks/useOfficerLocation';
+import { useOfficerSocket } from '@/hooks/useOfficerSocket';
 import { IncidentCard } from '@/components/CommandCenter/IncidentCard';
 import { IncidentTimeline } from '@/components/CommandCenter/IncidentTimeline';
 import { AudioVisualizer } from '@/components/CommandCenter/AudioVisualizer';
@@ -59,6 +60,9 @@ export default function OfficerHome() {
 
   const { location, locationError } = useOfficerLocation(officerId, officerName);
   const { pendingEmergencies, acceptEmergency } = useOfficerFirestore(location);
+  
+  // Realtime Socket
+  useOfficerSocket(officerId);
   
   useEffect(() => {
     if (locationError) {

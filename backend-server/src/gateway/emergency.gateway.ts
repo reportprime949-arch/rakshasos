@@ -10,18 +10,8 @@ import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
 
 @WebSocketGateway({
-  namespace: '/emergency',
   cors: {
-    origin: [
-      'https://rakshasos-backend.onrender.com',
-      'http://localhost:3001',
-      'http://localhost:3002',
-      'https://rakshasos-citizen.vercel.app',
-      'https://rakshasos-officer.vercel.app',
-      'https://rakshasos-admin.vercel.app',
-    ],
-    methods: ['GET', 'POST'],
-    credentials: true,
+    origin: '*',
   },
 })
 export class EmergencyGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -31,27 +21,30 @@ export class EmergencyGateway implements OnGatewayConnection, OnGatewayDisconnec
   private logger: Logger = new Logger('EmergencyGateway');
 
   handleConnection(client: Socket) {
-    this.logger.log(`Client connected: ${client.id}`);
+    this.logger.log(`🚨 CLIENT CONNECTED: ${client.id}`);
   }
 
   handleDisconnect(client: Socket) {
-    this.logger.log(`Client disconnected: ${client.id}`);
+    this.logger.log(`🔌 CLIENT DISCONNECTED: ${client.id}`);
   }
 
-  // Broadcast new emergency to all connected clients (Officers & Admins)
-  broadcastNewEmergency(payload: any) {
-    this.server.emit('new-emergency', payload);
+  // Called from EmergencyService when a new SOS is created via POST
+  emitNewEmergency(incident: any) {
+    this.logger.log(`📢 EMITTING emergency:new for ID: ${incident.id}`);
+    this.server.emit('emergency:new', incident);
   }
 
-  // Broadcast officer assignment
-  @SubscribeMessage('officer-accepted')
-  handleOfficerAccepted(@MessageBody() data: { requestId: string; officerId: string; officerName: string }) {
-    this.logger.log(`Officer ${data.officerName} accepted emergency ${data.requestId}`);
-    this.server.emit('officer-dispatched', data);
+  @SubscribeMessage('officer:accept')
+  handleOfficerAccept(@MessageBody() data: any) {
+    this.logger.log(`✅ OFFICER ACCEPTED: ${data.officerId} for SOS: ${data.id}`);
+    this.server.emit('emergency:update', {
+      ...data,
+      status: 'assigned',
+    });
   }
 
-  broadcastUpdate(event: string, payload: any) {
-    this.server.emit(event, payload);
+  emitUpdate(incident: any) {
+    this.logger.log(`🔄 EMITTING emergency:update for ID: ${incident.id}`);
+    this.server.emit('emergency:update', incident);
   }
 }
-

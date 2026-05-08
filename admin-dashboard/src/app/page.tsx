@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Shield, MapPin, AlertCircle, Users, Activity, ExternalLink } from 'lucide-react';
 import { useAdminStore } from '@/store/useAdminStore';
 import { useAdminFirestore } from '@/hooks/useAdminFirestore';
+import { useAdminSocket } from '@/hooks/useAdminSocket';
 import { useState, useEffect } from 'react';
 
 const AdminLiveMap = dynamic(() => import('@/components/admin/AdminLiveMap'), { 
@@ -23,8 +24,9 @@ export default function AdminDashboard() {
   const { emergencies, activeOfficers } = useAdminStore();
   const [isEmergencyVisualActive, setIsEmergencyVisualActive] = useState(false);
   
-  // Connect to Firestore realtime listener
+  // Connect to realtime listeners
   useAdminFirestore();
+  useAdminSocket();
 
   // Monitor for new incidents to trigger visual alerts only
   useEffect(() => {

@@ -70,6 +70,51 @@ export const useOfficerFirestore = (currentLocation: { lat: number; lng: number 
     return () => clearInterval(pollInterval);
   }, [isOnline, currentLocation, officerId]);
 
+  useEffect(() => {
+    const handleNewIncident = (event: any) => {
+      const data = event.detail;
+      console.log('💡 [IMMEDIATE UI UPDATE]: New SOS', data.id);
+      
+      const distance = currentLocation ? calculateDistance(
+        currentLocation.lat,
+        currentLocation.lng,
+        data.location.lat,
+        data.location.lng
+      ) : 0;
+      
+      const incidentWithDistance = { ...data, distanceKm: distance };
+      setPendingEmergencies(prev => {
+        if (prev.find(e => e.id === data.id)) return prev;
+        return [incidentWithDistance, ...prev];
+      });
+    };
+
+    const handleIncidentUpdate = (event: any) => {
+      const data = event.detail;
+      console.log('💡 [IMMEDIATE UI UPDATE]: Incident Status', data.id, data.status);
+      
+      setPendingEmergencies(prev => prev.map(e => e.id === data.id ? { ...e, ...data } : e));
+      
+      if (data.assignedOfficerId === officerId && ['assigned', 'enroute', 'arrived'].includes(data.status)) {
+        setDispatch({
+          id: data.id,
+          citizenName: data.citizenName,
+          lat: data.location.lat,
+          lng: data.location.lng,
+          description: data.description || 'Emergency SOS',
+        });
+        setStatus(data.status.toUpperCase());
+      }
+    };
+
+    window.addEventListener('new-incident', handleNewIncident);
+    window.addEventListener('incident-updated', handleIncidentUpdate);
+    return () => {
+      window.removeEventListener('new-incident', handleNewIncident);
+      window.removeEventListener('incident-updated', handleIncidentUpdate);
+    };
+  }, [currentLocation, officerId]);
+
   const acceptEmergency = async (id: string) => {
     console.log('👆 [OFFICER ACTION] Accept Button Clicked:', id);
     try {
