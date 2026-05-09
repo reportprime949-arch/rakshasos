@@ -99,4 +99,15 @@ export class EmergencyController {
       return { success: false, error: error.message };
     }
   }
+
+  @Patch(':id')
+  async updateStatus(@Param('id') id: string, @Body('status') status: string) {
+    console.log(`✅ Status update for ${id} -> ${status}`);
+    try {
+      const result = await this.emergencyService.updateStatus(id, status);
+      return { success: true, ...result };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
 }
