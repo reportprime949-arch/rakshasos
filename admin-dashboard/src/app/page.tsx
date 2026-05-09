@@ -1,12 +1,13 @@
 'use client';
 
+import React from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Shield, MapPin, AlertCircle, Users, Activity, ExternalLink } from 'lucide-react';
 import { useAdminStore } from '@/store/useAdminStore';
 import { useAdminFirestore } from '@/hooks/useAdminFirestore';
 import { useAdminSocket } from '@/hooks/useAdminSocket';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 
 const AdminLiveMap = dynamic(() => import('@/components/admin/AdminLiveMap'), { 
   ssr: false,
@@ -22,21 +23,36 @@ const AdminLiveMap = dynamic(() => import('@/components/admin/AdminLiveMap'), {
 
 export default function AdminDashboard() {
   const { emergencies, activeOfficers } = useAdminStore();
-  const [isEmergencyVisualActive, setIsEmergencyVisualActive] = useState(false);
-  
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+
   // Connect to realtime listeners
   useAdminFirestore();
   useAdminSocket();
 
-  // Filter emergencies into active and resolved
-  const activeIncidents = emergencies.filter(e => !['RESOLVED', 'COMPLETED', 'CANCELLED'].includes(e.status.toUpperCase()));
-  const resolvedIncidents = emergencies.filter(e => ['RESOLVED', 'COMPLETED'].includes(e.status.toUpperCase()));
+  // Filter emergencies into active and resolved — memoized to prevent recomputation
+  const activeIncidents = useMemo(() => 
+    emergencies.filter(e => !['RESOLVED', 'COMPLETED', 'CANCELLED'].includes(e.status.toUpperCase())),
+    [emergencies]
+  );
+  const resolvedIncidents = useMemo(() => 
+    emergencies.filter(e => ['RESOLVED', 'COMPLETED'].includes(e.status.toUpperCase())),
+    [emergencies]
+  );
 
   // Monitor for new incidents to trigger visual alerts only
+  const isEmergencyVisualActive = useMemo(() => 
+    activeIncidents.some(i => i.status === 'PENDING' || i.status === 'SEARCHING'),
+    [activeIncidents]
+  );
+
+  // Clear initial loading state after first data
   useEffect(() => {
-    const hasPending = activeIncidents.some(i => i.status === 'PENDING' || i.status === 'SEARCHING');
-    setIsEmergencyVisualActive(hasPending);
-  }, [activeIncidents]);
+    if (emergencies.length > 0 || !isInitialLoad) {
+      setIsInitialLoad(false);
+    }
+    const timer = setTimeout(() => setIsInitialLoad(false), 5000);
+    return () => clearTimeout(timer);
+  }, [emergencies]);
 
   return (
     <div className={`flex h-screen bg-black text-white overflow-hidden font-sans transition-all duration-700 ${isEmergencyVisualActive ? 'shadow-[inset_0_0_150px_rgba(220,38,38,0.4)] ring-4 ring-red-600 ring-inset' : ''}`}>
@@ -84,7 +100,26 @@ export default function AdminDashboard() {
             </div>
 
             <AnimatePresence mode="popLayout">
-              {activeIncidents.length === 0 ? (
+              {isInitialLoad ? (
+                <div className="space-y-4">
+                  {[1, 2].map((i) => (
+                    <div key={i} className="p-6 rounded-[2rem] border border-white/5 bg-white/5 animate-pulse">
+                      <div className="flex justify-between items-start mb-4">
+                        <div className="space-y-2">
+                          <div className="h-3 bg-white/5 rounded w-20" />
+                          <div className="h-5 bg-white/5 rounded w-32" />
+                        </div>
+                        <div className="h-5 bg-white/5 rounded-full w-16" />
+                      </div>
+                      <div className="space-y-3 mb-6">
+                        <div className="h-3 bg-white/5 rounded w-40" />
+                        <div className="h-3 bg-white/5 rounded w-48" />
+                      </div>
+                      <div className="h-3 bg-white/5 rounded w-24" />
+                    </div>
+                  ))}
+                </div>
+              ) : activeIncidents.length === 0 ? (
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -176,8 +211,8 @@ export default function AdminDashboard() {
   );
 }
 
-// Sub-component for incident rows to keep main code clean
-function IncidentRow({ alert, isActive }: { alert: any, isActive: boolean }) {
+// Sub-component for incident rows — memoized to prevent re-renders
+const IncidentRow = React.memo(function IncidentRow({ alert, isActive }: { alert: any, isActive: boolean }) {
   const isResolved = alert.status === 'RESOLVED' || alert.status === 'COMPLETED';
   
   return (
@@ -240,4 +275,4 @@ function IncidentRow({ alert, isActive }: { alert: any, isActive: boolean }) {
       </div>
     </motion.div>
   );
-}
+});

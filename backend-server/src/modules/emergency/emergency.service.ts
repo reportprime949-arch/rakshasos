@@ -6,8 +6,8 @@ import { FirebaseService } from '../../firebase/firebase.service';
 export class EmergencyService {
   private readonly logger = new Logger(EmergencyService.name);
   
-  // In-memory storage for SOS complaints
   private sosComplaints: any[] = [];
+  private archivedComplaints: any[] = [];
 
   constructor(
     @Inject(forwardRef(() => EmergencyGateway))
@@ -15,140 +15,117 @@ export class EmergencyService {
     private readonly firebase: FirebaseService,
   ) {}
 
-  async createSOS(data: { citizenName?: string; citizenId?: string; emergencyType: string; latitude?: number; longitude?: number; location?: { lat: number; lng: number } }) {
-    const lat = data.latitude ?? data.location?.lat ?? 0;
-    const lng = data.longitude ?? data.location?.lng ?? 0;
-
-    const newSOS = {
-      id: `SOS-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
-      citizenId: data.citizenId || 'anonymous',
-      citizenName: data.citizenName || 'Unknown Citizen',
-      emergencyType: data.emergencyType,
-      location: { lat, lng },
-      latitude: lat,
-      longitude: lng,
-      lat,
-      lng,
-      createdAt: new Date().toISOString(),
-      timestamp: Date.now(),
-      status: 'pending',
-    };
-
-    this.sosComplaints.push(newSOS);
-    this.logger.log(`🚨 SOS CREATED: ${newSOS.id} for ${newSOS.citizenName}`);
-    
-    // FIREBASE SYNC
+  async createSOS(data: any) {
     try {
-      const db = this.firebase.getFirestore();
-      if (db) {
-        await db.collection('emergencies').doc(newSOS.id).set({
-          ...newSOS,
-          updatedAt: new Date().toISOString(),
-        });
-        this.logger.log(`🔥 [FIREBASE] Sync Success: ${newSOS.id}`);
-      }
+      const lat = data.latitude ?? data.location?.lat ?? 0;
+      const lng = data.longitude ?? data.location?.lng ?? 0;
+
+      const newSOS = {
+        id: `SOS-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
+        citizenName: data.citizenName || 'Unknown Citizen',
+        emergencyType: data.emergencyType || 'General',
+        location: { lat, lng },
+        latitude: lat,
+        longitude: lng,
+        createdAt: new Date().toISOString(),
+        timestamp: Date.now(),
+        status: 'pending',
+      };
+
+      this.sosComplaints.push(newSOS);
       
-      // BROADCAST PUSH NOTIFICATION TO ALL OFFICERS
-      await this.firebase.sendPushNotification(
-        'officers_topic', // Assuming a topic for officers
-        '🚨 NEW EMERGENCY SOS',
-        `${newSOS.emergencyType.toUpperCase()} alert from ${newSOS.citizenName}`,
-        { incidentId: newSOS.id }
-      );
-    } catch (err) {
-      this.logger.error(`🔥 [FIREBASE] Sync/Notify Failed: ${err.message}`);
+      // BROADCAST
+      this.gateway.emitNewEmergency(newSOS);
+
+      return newSOS;
+    } catch (error) {
+      this.logger.error(`CREATE SOS ERROR: ${error.message}`);
+      throw error;
     }
-
-    // REALTIME EMIT
-    this.logger.log(`📡 EMITTING TO OFFICERS: ${newSOS.id}`);
-    this.gateway.emitNewEmergency(newSOS);
-
-    return newSOS;
   }
 
   async getAllEmergencies() {
-    this.logger.log(`📊 Complaints fetched: ${this.sosComplaints.length} found`);
-    return this.sosComplaints;
+    return [...this.sosComplaints, ...this.archivedComplaints];
   }
 
-  async updateStatus(id: string, status: string, officerData?: any) {
+  async getActiveEmergencies() {
+    return this.sosComplaints.filter(s => s.status !== 'resolved');
+  }
+
+  async updateStatus(id: string, status: string, data: any = {}) {
     const index = this.sosComplaints.findIndex(s => s.id === id);
     if (index !== -1) {
       this.sosComplaints[index] = {
         ...this.sosComplaints[index],
         status,
-        ...officerData,
-        updatedAt: new Date().toISOString(),
+        ...data,
+        updatedAt: new Date().toISOString()
       };
-      
-      this.logger.log(`✅ Incident Updated: ${id} to ${status}`);
-      
-      // FIREBASE SYNC
-      try {
-        const db = this.firebase.getFirestore();
-        if (db) {
-          await db.collection('emergencies').doc(id).update({
-            status,
-            ...officerData,
-            updatedAt: new Date().toISOString(),
-          });
-          this.logger.log(`🔥 [FIREBASE] Update Success: ${id}`);
-        }
-
-        // NOTIFY CITIZEN
-        if (['assigned', 'enroute', 'arrived'].includes(status)) {
-          const incident = this.sosComplaints[index];
-          await this.firebase.sendPushNotification(
-            incident.citizenId, // Ideally an FCM token stored in DB
-            '🚔 OFFICER UPDATE',
-            `Officer is ${status === 'assigned' ? 'responding' : status === 'enroute' ? 'on the way' : 'arrived'}.`,
-            { incidentId: id, status }
-          );
-        }
-      } catch (err) {
-        this.logger.error(`🔥 [FIREBASE] Update Failed: ${err.message}`);
-      }
-
-      // REALTIME UPDATE EMIT
       this.gateway.emitUpdate(this.sosComplaints[index]);
-
-      // ANALYTICS LOGGING
-      if (status === 'completed' || status === 'resolved') {
-        const incident = this.sosComplaints[index];
-        const durationMs = Date.now() - incident.timestamp;
-        const durationMin = (durationMs / 60000).toFixed(2);
-        
-        try {
-          const db = this.firebase.getFirestore();
-          if (db) {
-            await db.collection('system_analytics').add({
-              incidentId: id,
-              type: incident.emergencyType,
-              durationMin,
-              officerId: officerData?.assignedOfficerId,
-              timestamp: new Date().toISOString(),
-            });
-            this.logger.log(`📊 [ANALYTICS] Incident ${id} resolved in ${durationMin} min`);
-          }
-        } catch (err) {
-          this.logger.error(`📊 [ANALYTICS] Logging failed: ${err.message}`);
-        }
-      }
-      
       return this.sosComplaints[index];
     }
     return null;
   }
 
-  async getSOSById(id: string) {
-    return this.sosComplaints.find(s => s.id === id);
+  async resolveSOS(id: string, officerId: string) {
+    const index = this.sosComplaints.findIndex(s => s.id === id);
+    if (index !== -1) {
+      const resolved = {
+        ...this.sosComplaints[index],
+        status: 'resolved',
+        resolvedBy: officerId,
+        resolvedAt: new Date().toISOString()
+      };
+      this.sosComplaints.splice(index, 1);
+      this.archivedComplaints.push(resolved);
+      this.gateway.emitUpdate(resolved);
+      return resolved;
+    }
+    return null;
   }
 
-  async resolveSOS(id: string, officerId: string) {
-    const officerData = {
-      resolvedBy: officerId,
-      resolvedAt: new Date().toISOString(),
-    };
-    return this.updateStatus(id, 'resolved', officerData);
+  async cleanupAllIncidents() {
+    const count = this.sosComplaints.length;
+    this.sosComplaints = [];
+    this.archivedComplaints = [];
+    return { success: true, purged: count };
+  }
+
+  // STEP 8 — RECONNECT REAL LOGIC
+  async arrive(id: string) {
+    this.logger.log(`🚔 ARRIVAL CONFIRMED: ${id}`);
+    try {
+      const result = await this.updateStatus(id, 'arrived', {
+        arrivedAt: new Date().toISOString()
+      });
+
+      if (!result) {
+        throw new Error(`Incident ${id} not found`);
+      }
+
+      // SYNC TO FIREBASE
+      try {
+        const db = this.firebase.getFirestore();
+        if (db) {
+          await db.collection('emergencies').doc(id).update({
+            status: 'arrived',
+            arrivedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          });
+          this.logger.log(`🔥 [FIREBASE] Arrive Sync: ${id}`);
+        }
+      } catch (fErr) {
+        this.logger.warn(`⚠️ [FIREBASE] Sync Failed: ${fErr.message}`);
+      }
+
+      return result;
+    } catch (error) {
+      this.logger.error(`ARRIVE SERVICE ERROR: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async getSOSById(id: string) {
+    return this.sosComplaints.find(s => s.id === id) || this.archivedComplaints.find(s => s.id === id);
   }
 }

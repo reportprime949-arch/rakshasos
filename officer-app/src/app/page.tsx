@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Shield, 
@@ -48,6 +48,7 @@ export default function OfficerHome() {
     status, 
     socketStatus,
     backendStatus,
+    isLoading,
     setOnline, 
     setStatus, 
     setIncidents,
@@ -55,11 +56,17 @@ export default function OfficerHome() {
     setSocketStatus,
     setBackendStatus,
     clearDispatch,
+    removeIncident,
     officerId,
     officerName
   } = useOfficerStore();
+  
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const [isAccepting, setIsAccepting] = useState(false);
+  const [isArriving, setIsArriving] = useState(false);
+  const [isResolving, setIsResolving] = useState(false);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [showResolveModal, setShowResolveModal] = useState(false);
   const [lastResolvedId, setLastResolvedId] = useState('');
@@ -67,29 +74,43 @@ export default function OfficerHome() {
   const emergencyAlarmRef = useRef<HTMLAudioElement | null>(null);
   const vibrationIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const { location, locationError } = useOfficerLocation(officerId, officerName);
+  // Realtime Socket Subscription (single shared connection)
+  const { acceptIncident: emitAccept, emitLocationUpdate } = useOfficerSocket(officerId, officerName);
 
-  // Fetch real incidents on mount (Backup to socket sync)
-  const fetchIncidents = async () => {
-    const URL = 'https://rakshasos-backend.onrender.com/api/emergency';
+  const { location, locationError } = useOfficerLocation(officerId, officerName, emitLocationUpdate);
+
+  // === CRITICAL: Purge stale state on mount ===
+  useEffect(() => {
     try {
-      console.log('📡 [API POLLING] Fetching from:', URL);
+      localStorage.removeItem('officer-dispatch-session');
+      localStorage.removeItem('activeDispatch');
+      sessionStorage.clear();
+      
+      // If the store loaded with an active status, force clear
+      const currentState = useOfficerStore.getState();
+      if (currentState.status !== 'IDLE') {
+        console.log('🧹 [OFFICER RESET] Stale state found on mount — clearing');
+        currentState.clearDispatch();
+      }
+    } catch { /* SSR guard */ }
+  }, []);
+
+  // Fetch real incidents on mount (Backup to socket sync) — uses active-only endpoint
+  const fetchIncidents = useCallback(async () => {
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+    const URL = `${API_URL}/api/emergency/active`;
+    try {
       const res = await fetch(URL, { cache: 'no-store' });
       
       if (!res.ok) {
-        console.warn('⚠️ [API UNREACHABLE] Status:', res.status);
         setBackendStatus('UNREACHABLE');
         return;
       }
 
       const text = await res.text();
-      if (!text) {
-        console.warn('⚠️ [API EMPTY RESPONSE]');
-        return;
-      }
+      if (!text) return;
 
       const data = JSON.parse(text);
-      console.log('📥 [API SUCCESS] Data received:', data.length, 'incidents');
       setBackendStatus('HEALTHY');
       
       const filtered = data.filter((i: any) => i.status === 'pending' || i.status === 'searching');
@@ -97,11 +118,15 @@ export default function OfficerHome() {
 
       const assigned = data.find((i: any) => i.assignedOfficerId === officerId && ['assigned', 'enroute', 'arrived'].includes(i.status));
       if (assigned) {
+        console.log("🎯 [OFFICER SYNC] Active Dispatch Found:", assigned.id);
+        console.log("LAT:", assigned.latitude || assigned.lat || (assigned.location?.lat));
+        console.log("LNG:", assigned.longitude || assigned.lng || (assigned.location?.lng));
+        
         setDispatch({
           id: assigned.id,
           citizenName: assigned.citizenName,
-          lat: assigned.latitude || assigned.location?.lat || 0,
-          lng: assigned.longitude || assigned.location?.lng || 0,
+          latitude: assigned.latitude || assigned.lat || assigned.location?.lat || 0,
+          longitude: assigned.longitude || assigned.lng || assigned.location?.lng || 0,
           description: assigned.description || 'Emergency SOS',
           status: assigned.status
         });
@@ -111,7 +136,7 @@ export default function OfficerHome() {
       console.error('🔴 [API CRITICAL ERROR]:', err);
       setBackendStatus('UNREACHABLE');
     }
-  };
+  }, [officerId, setBackendStatus, setIncidents, setDispatch, setStatus]);
 
   useEffect(() => {
     fetchIncidents();
@@ -121,8 +146,7 @@ export default function OfficerHome() {
     return () => window.removeEventListener('trigger-alarm', handleAlarmEvent);
   }, []);
 
-  // Realtime Socket Subscription
-  const { acceptIncident: emitAccept } = useOfficerSocket(officerId, officerName);
+  // Socket subscription moved above useOfficerLocation for shared connection
 
   useEffect(() => {
     if (locationError) {
@@ -190,73 +214,134 @@ export default function OfficerHome() {
   };
 
 
-  const handleAcceptIncident = async (id: string) => {
+  const handleAcceptIncident = useCallback(async (id: string) => {
     stopEmergencyAlarm();
-    console.log('✅ Alarm stopped after ACCEPT');
-    console.log('👆 [ACCEPT BUTTON CLICKED]', id);
     setIsAccepting(true);
     
-    // Find incident and set as active dispatch
     const incident = activeIncidents.find(i => i.id === id);
     if (incident) {
       setDispatch({
         ...incident,
-        lat: incident.latitude || incident.location?.lat || incident.lat || 0,
-        lng: incident.longitude || incident.location?.lng || incident.lng || 0,
+        latitude: incident.latitude || incident.lat || 0,
+        longitude: incident.longitude || incident.lng || 0,
       });
     }
 
-    console.log('INCIDENT ACCEPTED', id);
     emitAccept(id, officerId);
-    
-    // Optimistic update
     setStatus('ASSIGNED');
     setIsAccepting(false);
-  };
-
-  const handleArrived = async () => {
+  }, [activeIncidents, emitAccept, officerId, setDispatch, setStatus]);
+  const handleArrived = useCallback(async () => {
     if (!activeDispatch) return;
+    
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+    const incident = activeDispatch;
+    setIsArriving(true);
+
+    console.log('🛰️ [ACTION] Confirming Arrival for:', incident.id);
+
     try {
-      console.log('🚔 [OFFICER ARRIVED]:', activeDispatch.id);
-      const res = await fetch(`https://rakshasos-backend.onrender.com/api/emergency/${activeDispatch.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'arrived' })
-      });
+      const response = await fetch(
+        `${API_URL}/api/emergency/${incident.id}/arrive`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          mode: 'cors'
+        }
+      );
 
-      if (!res.ok) throw new Error('Failed to update status');
+      // PART 9 — REMOVE NEXTJS OVERLAY ERRORS (Graceful parsing)
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        data = { success: response.ok, message: text };
+      }
 
+      console.log('ARRIVE RESPONSE:', data);
+
+      if (!response.ok) {
+        throw new Error(data.error || data.message || `Server Error ${response.status}`);
+      }
+
+      // SUCCESS FLOW
+      console.log('✅ [ARRIVAL SUCCESS]');
       setStatus('ARRIVED');
-    } catch (e) {
-      console.error('🔴 [ARRIVAL FAILED]:', e);
-    }
-  };
+      setDispatch({ ...activeDispatch, status: 'arrived' });
+      
+      // OPTIONAL: Alert as requested in PART 5
+      // alert('Arrival confirmed successfully');
 
-  const handleResolve = async () => {
+    } catch (error: any) {
+      console.error('🔴 ARRIVE FAILED:', error);
+
+      // PART 5 REQUIRED ALERT
+      alert(`
+Confirm Arrival Failed
+
+URL:
+${API_URL}/api/emergency/${incident.id}/arrive
+
+ERROR:
+${error.message}
+      `);
+    } finally {
+      setIsArriving(false);
+    }
+  }, [activeDispatch, setStatus, setDispatch]);
+
+  const handleResolve = useCallback(async () => {
     if (!activeDispatch) return;
     const resolvedId = activeDispatch.id;
+    setIsResolving(true);
+    
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+    const URL = `${API_URL}/api/emergency/${resolvedId}/resolve`;
+    
+    console.log('📡 [DEBUG] API_URL:', API_URL);
+    console.log('📡 [DEBUG] Incident ID:', resolvedId);
+
     try {
-      console.log('🏁 [RESOLVING INCIDENT]:', resolvedId);
-      const res = await fetch(`https://rakshasos-backend.onrender.com/api/emergency/${resolvedId}/resolve`, {
+      const res = await fetch(URL, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ officerId })
+        headers: { 
+          'Content-Type': 'application/json'
+        },
+        mode: 'cors'
       });
 
-      if (!res.ok) throw new Error('Failed to resolve incident');
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => 'No error body');
+        throw new Error(`Server returned ${res.status}: ${errorText}`);
+      }
 
+      console.log("✅ [RESOLUTION SUCCESS]");
       setLastResolvedId(resolvedId);
       setShowResolveModal(true);
+      
+      // NOW CLEAR EVERYTHING
+      removeIncident(resolvedId);
       clearDispatch();
       setStatus('IDLE');
       
-      // Refresh incidents list
+      // Refresh list
       fetchIncidents();
-    } catch (e) {
+    } catch (e: any) {
       console.error('🔴 [RESOLVE FAILED]:', e);
-      alert('Failed to resolve emergency. Please try again.');
+      alert(`Resolution Failed: ${e.message}`);
+    } finally {
+      setIsResolving(false);
     }
-  };
+  }, [activeDispatch, officerId, removeIncident, clearDispatch, setStatus, fetchIncidents]);
+
+  if (!mounted) return (
+    <div className="h-screen bg-[#050505] flex items-center justify-center">
+      <div className="w-16 h-16 border-4 border-white/5 border-t-blue-500 rounded-full animate-spin" />
+    </div>
+  );
 
   return (
     <main className={`h-screen bg-[#050505] text-[#f5f5f5] flex overflow-hidden font-sans selection:bg-red-500/30 transition-all duration-700 ${isAlarmActive ? 'shadow-[inset_0_0_150px_rgba(220,38,38,0.4)] ring-4 ring-red-600 ring-inset' : ''}`}>
@@ -347,6 +432,7 @@ export default function OfficerHome() {
                     onViewDetails={() => {}} 
                     onAccept={() => handleAcceptIncident(activeDispatch.id)} 
                     isLoading={isAccepting}
+                    showAcceptButton={false}
                   />
                   
                   <div className="glass p-6 rounded-[2rem] border border-white/5 bg-white/5">
@@ -364,26 +450,66 @@ export default function OfficerHome() {
                     <IncidentTimeline status={status} />
                   </div>
 
-                  {status === 'EN_ROUTE' && (
-                    <button
+                  {status !== 'ARRIVED' && (status === 'ASSIGNED' || status === 'EN_ROUTE') && (
+                    <motion.button
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
                       onClick={handleArrived}
-                      className="w-full h-20 bg-blue-500 rounded-3xl font-black text-xs uppercase tracking-[0.3em] flex items-center justify-center space-x-3 shadow-[0_20px_50px_rgba(59,130,246,0.3)] hover:scale-[1.02] transition-all group"
+                      disabled={isArriving}
+                      className={`w-full h-20 rounded-3xl font-black text-xs uppercase tracking-[0.3em] flex items-center justify-center space-x-3 transition-all group shadow-[0_20px_50px_rgba(59,130,246,0.3)] ${
+                        isArriving ? 'bg-blue-500/50 cursor-wait' : 'bg-blue-500 hover:scale-[1.02] cursor-pointer'
+                      }`}
                     >
-                      <Navigation size={20} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
-                      <span>Confirm Arrival</span>
-                    </button>
+                      {isArriving ? (
+                        <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        <Navigation size={20} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                      )}
+                      <span>{isArriving ? 'Processing...' : 'Confirm Arrival'}</span>
+                    </motion.button>
                   )}
 
                   {status === 'ARRIVED' && (
-                    <button
+                    <motion.button
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
                       onClick={handleResolve}
-                      className="w-full h-20 bg-green-500 rounded-3xl font-black text-xs uppercase tracking-[0.3em] flex items-center justify-center space-x-3 shadow-[0_20px_50px_rgba(34,197,94,0.3)] hover:scale-[1.02] transition-all group"
+                      disabled={isResolving}
+                      className={`w-full h-20 rounded-3xl font-black text-xs uppercase tracking-[0.3em] flex items-center justify-center space-x-3 transition-all group shadow-[0_20px_50px_rgba(34,197,94,0.3)] ${
+                        isResolving ? 'bg-green-500/50 cursor-wait' : 'bg-green-600 hover:bg-green-500 hover:scale-[1.02] cursor-pointer'
+                      }`}
                     >
-                      <CheckCircle size={20} className="group-hover:scale-110 transition-transform" />
-                      <span>Resolve Emergency</span>
-                    </button>
+                      {isResolving ? (
+                        <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        <CheckCircle size={20} className="group-hover:scale-110 transition-transform" />
+                      )}
+                      <span>{isResolving ? 'Archiving...' : 'Resolve Incident'}</span>
+                    </motion.button>
                   )}
                 </motion.div>
+              ) : isLoading ? (
+                <div className="grid gap-6">
+                  {[1, 2].map((i) => (
+                    <div key={i} className="glass p-6 rounded-[2rem] border border-white/5 animate-pulse">
+                      <div className="flex items-center space-x-4 mb-6">
+                        <div className="w-12 h-12 rounded-2xl bg-white/5" />
+                        <div className="space-y-2 flex-1">
+                          <div className="h-4 bg-white/5 rounded w-2/3" />
+                          <div className="h-3 bg-white/5 rounded w-1/3" />
+                        </div>
+                      </div>
+                      <div className="space-y-3 mb-8">
+                        <div className="h-3 bg-white/5 rounded w-full" />
+                        <div className="h-3 bg-white/5 rounded w-3/4" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="h-12 rounded-2xl bg-white/5" />
+                        <div className="h-12 rounded-2xl bg-white/5" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               ) : activeIncidents.length > 0 ? (
                 <div className="grid gap-6">
                   {activeIncidents.map((emergency) => (
@@ -472,7 +598,7 @@ export default function OfficerHome() {
         {/* Real Live Map */}
         <OfficerLiveMap 
           officerLoc={location} 
-          citizenLoc={activeDispatch ? { lat: activeDispatch.lat, lng: activeDispatch.lng } : null}
+          citizenLoc={activeDispatch ? { latitude: activeDispatch.latitude, longitude: activeDispatch.longitude } : null}
           active={!!activeDispatch}
           incidents={activeIncidents}
           activeDispatch={activeDispatch}
@@ -507,6 +633,38 @@ export default function OfficerHome() {
               <span className="text-[8px] text-gray-500 font-bold uppercase">Backend</span>
               <span className={`text-[8px] font-black uppercase ${backendStatus === 'HEALTHY' ? 'text-blue-500' : 'text-red-500'}`}>{backendStatus}</span>
             </div>
+
+            {/* STEP 6 — TEST PATCH MANUALLY */}
+            <button 
+              onClick={() => {
+                const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+                const testId = activeDispatch?.id || 'SOS-TEST';
+                console.log('🧪 [MANUAL TEST] Starting PATCH for:', testId);
+                fetch(
+                  `${API_URL}/api/emergency/${testId}/arrive`,
+                  {
+                    method: 'PATCH',
+                    headers: {
+                      'Content-Type': 'application/json'
+                    }
+                  }
+                )
+                .then(async res => {
+                  console.log('🧪 [MANUAL TEST] STATUS:', res.status);
+                  const text = await res.text();
+                  console.log('🧪 [MANUAL TEST] BODY:', text);
+                  alert(`Diagnostic Result:\nStatus: ${res.status}\nBody: ${text}`);
+                })
+                .catch(err => {
+                  console.error('🧪 [MANUAL TEST] PATCH ERROR:', err);
+                  alert(`Diagnostic Failed:\nError: ${err.message}`);
+                });
+              }}
+              className="w-full py-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-[8px] font-black uppercase tracking-widest text-blue-500 hover:bg-blue-500/20 transition-all"
+            >
+              Diagnostic Patch Test
+            </button>
+
             <div className="flex justify-between items-center">
               <span className="text-[8px] text-gray-500 font-bold uppercase">Active SOS</span>
               <span className="text-[8px] font-black text-white uppercase">{activeIncidents.length}</span>

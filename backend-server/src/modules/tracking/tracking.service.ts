@@ -24,7 +24,13 @@ export class TrackingService {
     await this.redis.updateResponderLocation(officerId, lat, lng);
 
     // 2. Broadcast to relevant rooms
-    this.gateway.server.emit('officer_moved', { officerId, lat, lng });
+    this.gateway.server.emit('officer_moved', { 
+      officerId, 
+      latitude: lat, 
+      longitude: lng,
+      lat, 
+      lng 
+    });
 
     // Find if officer is currently on a dispatch
     const activeRequest = await this.prisma.emergencyRequest.findFirst({
@@ -39,6 +45,8 @@ export class TrackingService {
       this.gateway.server.emit('officer_location_update', { 
         id: activeRequest.id,
         citizenId: activeRequest.citizenId,
+        latitude: lat,
+        longitude: lng,
         lat, 
         lng 
       });

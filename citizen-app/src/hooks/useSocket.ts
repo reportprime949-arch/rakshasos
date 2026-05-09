@@ -51,6 +51,18 @@ export const useSocket = (token?: string) => {
       if (data.id === currentId) {
         console.log('🔄 [CITIZEN REALTIME] Status Update:', data.status);
         
+        // Terminal states — resolve/complete the incident on citizen side
+        if (data.status === 'resolved' || data.status === 'completed') {
+          updateStatus('COMPLETED');
+          return;
+        }
+        
+        if (data.status === 'cancelled') {
+          updateStatus('CANCELLED');
+          return;
+        }
+        
+        // Officer responding states — update officer info
         if (data.status === 'assigned' || data.status === 'enroute' || data.status === 'arrived') {
           assignOfficer({
             id: data.officerId || 'OFF-123',
@@ -59,10 +71,11 @@ export const useSocket = (token?: string) => {
             phone: data.officerPhone || '+1 555-0123',
             lat: data.location?.lat || 0,
             lng: data.location?.lng || 0,
-            eta: '4 Min',
+            eta: data.status === 'arrived' ? 'Arrived' : '4 Min',
           });
         }
         
+        // Map status correctly — 'arrived' stays as ARRIVED, not COMPLETED
         updateStatus(data.status.toUpperCase());
       }
     });

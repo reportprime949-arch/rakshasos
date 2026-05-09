@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, useMap, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -13,10 +13,10 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
+import { Navigation, Activity } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Shield, AlertTriangle, Navigation, MapPin, Activity, Zap } from 'lucide-react';
 
-// Premium Cyber Icons
+// Premium Cyber Icons — defined outside component to avoid re-creation
 const officerIcon = L.divIcon({
   className: 'cyber-officer-icon',
   html: `
@@ -36,7 +36,6 @@ const incidentIcon = L.divIcon({
   className: 'cyber-incident-icon',
   html: `
     <div class="relative">
-      <!-- Intense Tactical Radar Pulse -->
       <div class="absolute -inset-12 bg-red-600/20 rounded-full blur-3xl animate-ping opacity-50"></div>
       <div class="absolute -inset-16 bg-red-600/10 rounded-full border-2 border-red-600/30 animate-[ping_2s_linear_infinite]"></div>
       <div class="absolute -inset-20 bg-red-600/5 rounded-full border border-red-600/20 animate-[ping_3s_linear_infinite]"></div>
@@ -51,63 +50,100 @@ const incidentIcon = L.divIcon({
   iconAnchor: [20, 20]
 });
 
+// Haversine distance in meters
+function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 interface MapProps {
-  officerLoc: { lat: number; lng: number } | null;
-  citizenLoc: { lat: number; lng: number; latitude?: number; longitude?: number } | null;
+  officerLoc: { latitude: number; longitude: number } | null;
+  citizenLoc: { latitude: number; longitude: number } | null;
   active: boolean;
   incidents?: any[];
   activeDispatch?: any | null;
 }
 
-function MapController({ officerLoc, citizenLoc, active }: MapProps) {
+// Memoized map controller — only re-runs when coordinates actually change
+const MapController = React.memo(function MapController({ officerLoc, citizenLoc, active }: MapProps) {
   const map = useMap();
 
   useEffect(() => {
     if (active && officerLoc && citizenLoc) {
+      const cLat = citizenLoc.latitude;
+      const cLng = citizenLoc.longitude;
+      console.log(`🗺️ [MAP CONTROLLER] Fitting bounds: Officer[${officerLoc.latitude}, ${officerLoc.longitude}] Citizen[${cLat}, ${cLng}]`);
+      
       const bounds = L.latLngBounds([
-        [officerLoc.lat, officerLoc.lng],
-        [citizenLoc.latitude || citizenLoc.lat, citizenLoc.longitude || citizenLoc.lng]
+        [officerLoc.latitude, officerLoc.longitude],
+        [cLat, cLng]
       ]);
       map.fitBounds(bounds, { padding: [120, 120], animate: true, duration: 2 });
     } else if (officerLoc) {
-      map.setView([officerLoc.lat, officerLoc.lng], 14, { animate: true });
+      console.log(`🗺️ [MAP CONTROLLER] Setting view to Officer: ${officerLoc.latitude}, ${officerLoc.longitude}`);
+      map.setView([officerLoc.latitude, officerLoc.longitude], 14, { animate: true });
     }
-  }, [officerLoc?.lat, officerLoc?.lng, citizenLoc?.lat, citizenLoc?.lng, citizenLoc?.latitude, citizenLoc?.longitude, active, map]);
+  }, [officerLoc?.latitude, officerLoc?.longitude, citizenLoc?.latitude, citizenLoc?.longitude, active, map]);
 
   return null;
-}
+});
 
-const OfficerLiveMap = ({ officerLoc, citizenLoc, active, incidents = [], activeDispatch = null }: MapProps) => {
+const OfficerLiveMap = React.memo(({ officerLoc, citizenLoc, active, incidents = [], activeDispatch = null }: MapProps) => {
   const [routes, setRoutes] = useState<any[]>([]);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [currentBlock, setCurrentBlock] = useState("LOCATING...");
+  const lastRouteFetchRef = useRef<{ oLat: number; oLng: number; cLat: number; cLng: number } | null>(null);
+  const routeTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch Routes
+  // Debounced route fetch — only refetch when positions change by >50m
   useEffect(() => {
-    const fetchRoutes = async () => {
-      if (!active || !officerLoc || !citizenLoc) {
-        setRoutes([]);
-        return;
-      }
+    if (!active || !officerLoc || !citizenLoc) {
+      setRoutes([]);
+      return;
+    }
 
+    const cLat = citizenLoc.latitude;
+    const cLng = citizenLoc.longitude;
+    const last = lastRouteFetchRef.current;
+
+    // Skip if positions haven't changed significantly (50m threshold)
+    if (last && !isInitialLoad) {
+      const officerMoved = distanceMeters(last.oLat, last.oLng, officerLoc.latitude, officerLoc.longitude);
+      const citizenMoved = distanceMeters(last.cLat, last.cLng, cLat, cLng);
+      if (officerMoved < 50 && citizenMoved < 50) return;
+    }
+
+    // Debounce route requests to avoid rapid-fire API calls
+    if (routeTimerRef.current) clearTimeout(routeTimerRef.current);
+
+    routeTimerRef.current = setTimeout(async () => {
       try {
-        const res = await fetch(
-          `https://router.project-osrm.org/route/v1/driving/${officerLoc.lng},${officerLoc.lat};${citizenLoc.lng},${citizenLoc.lat}?overview=full&geometries=geojson`
-        );
-        const text = await res.text();
-        if (!text) return;
+        const url = `https://router.project-osrm.org/route/v1/driving/${officerLoc.longitude},${officerLoc.latitude};${cLng},${cLat}?overview=full&geometries=geojson`;
+        console.log("🗺️ [OSRM REQUEST]:", url);
         
-        const data = JSON.parse(text);
-        if (data.routes) {
+        const res = await fetch(url);
+        const data = await res.json();
+        
+        if (data.routes && data.routes.length > 0) {
+          const route = data.routes[0];
+          console.log(`🗺️ [OSRM SUCCESS] Distance: ${route.distance}m, Duration: ${route.duration}s`);
           setRoutes(data.routes);
+          lastRouteFetchRef.current = { oLat: officerLoc.latitude, oLng: officerLoc.longitude, cLat, cLng };
           if (isInitialLoad) setIsInitialLoad(false);
         }
-      } catch (e) { console.error('🔴 [ROUTING ERROR]:', e); }
-    };
+      } catch (e) { 
+        console.error('🔴 [ROUTING ERROR]:', e); 
+      }
+    }, isInitialLoad ? 0 : 3000);
 
-    const timer = setTimeout(fetchRoutes, isInitialLoad ? 0 : 5000);
-    return () => clearTimeout(timer);
-  }, [officerLoc?.lat, officerLoc?.lng, citizenLoc?.lat, citizenLoc?.lng, active]);
+    return () => {
+      if (routeTimerRef.current) clearTimeout(routeTimerRef.current);
+    };
+  }, [officerLoc?.latitude, officerLoc?.longitude, citizenLoc?.latitude, citizenLoc?.longitude, active]);
 
   const currentRoute = routes[0];
   const eta = currentRoute ? `${Math.round(currentRoute.duration / 60)} MIN` : 'CALC...';
@@ -118,29 +154,46 @@ const OfficerLiveMap = ({ officerLoc, citizenLoc, active, incidents = [], active
     return currentRoute.geometry.coordinates.map((c: any) => [c[1], c[0]]);
   }, [currentRoute]);
 
-  // Midpoint for the route info card
   const midpoint = useMemo(() => {
     if (routeCoords.length < 2) return null;
     return routeCoords[Math.floor(routeCoords.length / 2)];
   }, [routeCoords]);
 
+  // Memoize officer position to prevent marker re-renders
+  const officerPosition = useMemo(() => {
+    if (!officerLoc) return null;
+    return [officerLoc.latitude, officerLoc.longitude] as [number, number];
+  }, [officerLoc?.latitude, officerLoc?.longitude]);
+
+  // Memoize incident positions
+  const incidentPositions = useMemo(() => {
+    return incidents.map((incident: any) => {
+      const lat = incident.latitude || 0;
+      const lng = incident.longitude || 0;
+      if (incident.id === activeDispatch?.id) {
+        console.log(`🚨 [MAP INCIDENT] Active Dispatch Coords: LAT:${lat}, LNG:${lng}`);
+      }
+      return {
+        id: incident.id,
+        position: [lat, lng] as [number, number],
+        isActive: incident.id === activeDispatch?.id
+      };
+    });
+  }, [incidents, activeDispatch?.id]);
+
   return (
     <div className="relative w-full h-full rounded-[3.5rem] overflow-hidden border border-white/5 bg-[#050505] cyber-map-container shadow-[0_0_100px_rgba(0,0,0,0.8)]">
       <style jsx global>{`
-        /* DEEP NAVY CYBER MAP FILTER */
         .cyber-map-container .leaflet-tile-container {
           filter: invert(100%) hue-rotate(180deg) brightness(80%) contrast(120%) saturate(20%);
         }
         .leaflet-container { background: #050505 !important; cursor: crosshair !important; }
-        
-        /* SCANLINE GRID OVERLAY */
         .cyber-map-grid {
           background-image: linear-gradient(rgba(18,16,16,0) 50%, rgba(0,0,0,0.25) 50%), 
                             linear-gradient(90deg, rgba(255,0,0,0.06), rgba(0,255,0,0.02), rgba(0,0,255,0.06));
           background-size: 100% 2px, 3px 100%;
           pointer-events: none;
         }
-
         .cyber-route-card {
           background: rgba(10, 10, 10, 0.9) !important;
           border: 1px solid rgba(59, 130, 246, 0.5) !important;
@@ -153,7 +206,6 @@ const OfficerLiveMap = ({ officerLoc, citizenLoc, active, incidents = [], active
           box-shadow: 0 0 20px rgba(59, 130, 246, 0.3) !important;
           white-space: nowrap !important;
         }
-
         .route-path-animated {
           stroke-dasharray: 10, 20;
           animation: route-flow 1s linear infinite;
@@ -173,18 +225,20 @@ const OfficerLiveMap = ({ officerLoc, citizenLoc, active, incidents = [], active
         zoomControl={false}
         style={{ width: '100%', height: '100%' }}
       >
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <TileLayer 
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          updateWhenZooming={false}
+          updateWhenIdle={true}
+        />
         <MapController officerLoc={officerLoc} citizenLoc={citizenLoc} active={active} />
 
         {/* GLOWING ROUTE PATH */}
         {routeCoords.length > 0 && (
           <>
-            {/* Outer Glow */}
             <Polyline
               positions={routeCoords}
               pathOptions={{ color: '#2563eb', weight: 14, opacity: 0.15, lineJoin: 'round', lineCap: 'round' }}
             />
-            {/* Main Path */}
             <Polyline
               positions={routeCoords}
               className="route-path-animated"
@@ -206,8 +260,8 @@ const OfficerLiveMap = ({ officerLoc, citizenLoc, active, incidents = [], active
         )}
 
         {/* OFFICER UNIT */}
-        {officerLoc && (
-          <Marker position={[officerLoc.lat, officerLoc.lng]} icon={officerIcon}>
+        {officerPosition && (
+          <Marker position={officerPosition} icon={officerIcon}>
             <Tooltip permanent direction="top" offset={[0, -20]} className="!bg-transparent !border-none !shadow-none !text-green-500 font-black text-[8px] tracking-[0.3em] uppercase italic">
               YOU (OFFICER)
             </Tooltip>
@@ -215,24 +269,21 @@ const OfficerLiveMap = ({ officerLoc, citizenLoc, active, incidents = [], active
         )}
 
         {/* ALL ACTIVE INCIDENTS */}
-        {incidents.map((incident: any) => (
+        {incidentPositions.map((item) => (
           <Marker 
-            key={incident.id} 
-            position={[
-              incident.latitude || incident.location?.lat || incident.lat || 0, 
-              incident.longitude || incident.location?.lng || incident.lng || 0
-            ]} 
+            key={item.id} 
+            position={item.position} 
             icon={incidentIcon}
           >
             <Tooltip permanent direction="top" offset={[0, -25]} className="!bg-transparent !border-none !shadow-none !text-red-500 font-black text-[8px] tracking-[0.3em] uppercase italic">
-              {incident.id === activeDispatch?.id ? 'ACTIVE DISPATCH' : 'PENDING SOS'}
+              {item.isActive ? 'ACTIVE DISPATCH' : 'PENDING SOS'}
             </Tooltip>
           </Marker>
         ))}
 
         {/* ACTIVE DISPATCH (If not in incidents list) */}
         {active && citizenLoc && !incidents.find(i => i.id === activeDispatch?.id) && (
-          <Marker position={[citizenLoc.latitude || citizenLoc.lat, citizenLoc.longitude || citizenLoc.lng]} icon={incidentIcon}>
+          <Marker position={[citizenLoc.latitude, citizenLoc.longitude]} icon={incidentIcon}>
             <Tooltip permanent direction="top" offset={[0, -25]} className="!bg-transparent !border-none !shadow-none !text-red-500 font-black text-[8px] tracking-[0.3em] uppercase italic">
               ACTIVE DISPATCH
             </Tooltip>
@@ -314,6 +365,14 @@ const OfficerLiveMap = ({ officerLoc, citizenLoc, active, incidents = [], active
       </AnimatePresence>
     </div>
   );
-};
+}, (prev, next) => {
+  // Custom comparator — only re-render when meaningful props change
+  const sameOfficer = prev.officerLoc?.latitude === next.officerLoc?.latitude && prev.officerLoc?.longitude === next.officerLoc?.longitude;
+  const sameCitizen = prev.citizenLoc?.latitude === next.citizenLoc?.latitude && prev.citizenLoc?.longitude === next.citizenLoc?.longitude;
+  const sameActive = prev.active === next.active;
+  const sameIncidents = prev.incidents?.length === next.incidents?.length;
+  const sameDispatch = prev.activeDispatch?.id === next.activeDispatch?.id;
+  return sameOfficer && sameCitizen && sameActive && sameIncidents && sameDispatch;
+});
 
 export default OfficerLiveMap;

@@ -7,45 +7,96 @@ export class EmergencyController {
 
   constructor(private emergencyService: EmergencyService) {}
 
-  @Get()
-  async getAll() {
-    this.logger.log('📊 Fetching all active incidents');
-    return this.emergencyService.getAllEmergencies();
+  // PART 2 — VERIFY PATCH ROUTE WORKS
+  @Get('health')
+  health() {
+    console.log('HEALTH CHECK HIT');
+    return {
+      ok: true,
+      timestamp: new Date().toISOString()
+    };
   }
 
-  @Post()
-  async createSOS(@Body() body: { citizenName: string; emergencyType: string; latitude: number; longitude: number; location: { lat: number; lng: number } }) {
+  // STEP 3 — EXACT ARRIVE ROUTE HANDLER
+  @Patch(':id/arrive')
+  async arriveEmergency(@Param('id') id: string) {
+    console.log('Officer arrived:', id);
+    
     try {
-      this.logger.log(`🚨 SOS RECEIVED from ${body.citizenName}`);
-      const result = await this.emergencyService.createSOS(body);
+      const result = await this.emergencyService.arrive(id);
+      
+      // Ensure we return exactly what the user requested
       return {
         success: true,
-        message: 'Emergency alert sent',
-        ...result,
+        status: 'arrived',
+        incidentId: id,
+        ...result // Include real updated data for frontend sync
       };
     } catch (error) {
-      this.logger.error('❌ SOS FAILED:', error);
+      console.error('ARRIVE ERROR:', error);
       return {
         success: false,
-        error: 'Server error',
+        error: error.message
       };
     }
   }
 
-  @Patch(':id')
-  async updateStatus(@Param('id') id: string, @Body('status') status: string) {
-    this.logger.log(`✅ Updating status for ${id} to ${status}`);
-    return this.emergencyService.updateStatus(id, status);
+  @Get()
+  async getAll() {
+    try {
+      return await this.emergencyService.getAllEmergencies();
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  @Get('active')
+  async getActive() {
+    try {
+      return await this.emergencyService.getActiveEmergencies();
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  @Post()
+  async createSOS(@Body() body: any) {
+    try {
+      const result = await this.emergencyService.createSOS(body);
+      return {
+        success: true,
+        ...result
+      };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  @Patch(':id/resolve')
+  async resolve(@Param('id') id: string) {
+    try {
+      const result = await this.emergencyService.resolveSOS(id, 'SYSTEM');
+      return { success: true, status: 'resolved', incidentId: id };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  @Post('cleanup')
+  async cleanup() {
+    try {
+      return await this.emergencyService.cleanupAllIncidents();
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
   }
 
   @Get(':id')
   async getById(@Param('id') id: string) {
-    return this.emergencyService.getSOSById(id);
-  }
-
-  @Patch(':id/resolve')
-  async resolve(@Param('id') id: string, @Body('officerId') officerId: string) {
-    this.logger.log(`🏁 Resolving incident ${id} by officer ${officerId}`);
-    return this.emergencyService.resolveSOS(id, officerId);
+    try {
+      return await this.emergencyService.getSOSById(id);
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
   }
 }

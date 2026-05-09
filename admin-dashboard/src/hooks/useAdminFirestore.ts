@@ -12,36 +12,74 @@ export const useAdminFirestore = () => {
         const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/emergency`);
         const emergencies = await response.json();
         
-        const mapped = emergencies.map((e: any) => ({
-          id: e.id,
-          citizenName: e.citizenName,
-          status: e.status.toUpperCase(),
-          lat: e.location.lat,
-          lng: e.location.lng,
-          createdAt: e.createdAt,
-          emergencyType: e.emergencyType,
-        }));
+        const mapped = emergencies.map((e: any) => {
+          const latitude = e.latitude || e.location?.lat || e.lat || 0;
+          const longitude = e.longitude || e.location?.lng || e.lng || 0;
+          console.log(`📡 [ADMIN SYNC] Incident ${e.id} LAT:`, latitude, "LNG:", longitude);
+          
+          return {
+            id: e.id,
+            citizenName: e.citizenName,
+            status: e.status.toUpperCase(),
+            latitude,
+            longitude,
+            lat: latitude,
+            lng: longitude,
+            createdAt: e.createdAt,
+            emergencyType: e.emergencyType,
+          };
+        });
         
         setEmergencies(mapped);
       } catch (error) {
         console.error('Admin polling error:', error);
       }
-    }, 3000);
+    }, 15000);
 
     return () => clearInterval(pollInterval);
   }, [setEmergencies]);
 
   useEffect(() => {
     const handleNewIncident = (event: any) => {
-      const data = event.detail;
-      console.log('🚨 [ADMIN IMMEDIATE] New SOS:', data.id);
-      addEmergency(data);
+      const e = event.detail;
+      console.log('🚨 [ADMIN IMMEDIATE] New SOS:', e.id);
+      const latitude = e.latitude || e.location?.lat || e.lat || 0;
+      const longitude = e.longitude || e.location?.lng || e.lng || 0;
+      console.log(`🚨 [ADMIN IMMEDIATE] New SOS ${e.id} LAT:`, latitude, "LNG:", longitude);
+
+      const mapped = {
+        id: e.id,
+        citizenName: e.citizenName,
+        status: (e.status || 'PENDING').toUpperCase(),
+        latitude,
+        longitude,
+        lat: latitude,
+        lng: longitude,
+        createdAt: e.createdAt,
+        emergencyType: e.emergencyType,
+      };
+      addEmergency(mapped);
     };
 
     const handleIncidentUpdate = (event: any) => {
-      const data = event.detail;
-      console.log('🔄 [ADMIN IMMEDIATE] SOS Updated:', data.id);
-      updateEmergency(data);
+      const e = event.detail;
+      console.log('🔄 [ADMIN IMMEDIATE] SOS Updated:', e.id);
+      const latitude = e.latitude || e.location?.lat || e.lat || 0;
+      const longitude = e.longitude || e.location?.lng || e.lng || 0;
+      console.log(`🔄 [ADMIN IMMEDIATE] Update SOS ${e.id} LAT:`, latitude, "LNG:", longitude);
+
+      const mapped = {
+        id: e.id,
+        citizenName: e.citizenName,
+        status: (e.status || 'PENDING').toUpperCase(),
+        latitude,
+        longitude,
+        lat: latitude,
+        lng: longitude,
+        createdAt: e.createdAt,
+        emergencyType: e.emergencyType,
+      };
+      updateEmergency(mapped);
     };
 
     window.addEventListener('new-incident', handleNewIncident);

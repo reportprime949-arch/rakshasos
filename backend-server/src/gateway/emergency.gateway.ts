@@ -65,7 +65,7 @@ export class EmergencyGateway implements OnGatewayConnection, OnGatewayDisconnec
     this.broadcastRegistry();
     
     // Send current active incidents immediately on join
-    this.emergencyService.getAllEmergencies().then(incidents => {
+    this.emergencyService.getActiveEmergencies().then(incidents => {
       client.emit('emergency:all', incidents);
     });
   }

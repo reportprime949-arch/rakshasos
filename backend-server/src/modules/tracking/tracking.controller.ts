@@ -8,7 +8,9 @@ export class TrackingController {
   constructor(private trackingService: TrackingService) {}
 
   @Post('location')
-  updateLocation(@Req() req: any, @Body() body: { lat: number, lng: number }) {
-    return this.trackingService.updateLocation(req.user.id, body.lat, body.lng);
+  updateLocation(@Req() req: any, @Body() body: { latitude: number; longitude: number; lat?: number; lng?: number }) {
+    const lat = body.latitude ?? body.lat ?? 0;
+    const lng = body.longitude ?? body.lng ?? 0;
+    return this.trackingService.updateLocation(req.user.id, lat, lng);
   }
 }

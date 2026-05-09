@@ -11,19 +11,11 @@ async function bootstrap() {
   const logger = new Logger('RakshaSOS-Main');
   const app = await NestFactory.create(AppModule);
   
-  // Security Hardening
-  app.use(helmet());
-  app.use(
-    rateLimit({
-      windowMs: 15 * 60 * 1000, // 15 minutes
-      max: 100, // limit each IP to 100 requests per windowMs
-    }),
-  );
-
+  // STEP 3 — ENABLE GLOBAL CORS
   app.enableCors({
     origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    credentials: true,
+    methods: '*',
+    allowedHeaders: '*',
   });
 
   app.useGlobalPipes(new ValidationPipe({

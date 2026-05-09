@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useOfficerStore, DispatchAlert } from '@/store/useOfficerStore';
 import { calculateDistance } from '@/utils/distance';
 
-export const useOfficerFirestore = (currentLocation: { lat: number; lng: number } | null) => {
+export const useOfficerFirestore = (currentLocation: { latitude: number; longitude: number } | null) => {
   const { setDispatch, isOnline, activeDispatch, setStatus, officerId, officerName } = useOfficerStore();
   const [pendingEmergencies, setPendingEmergencies] = useState<DispatchAlert[]>([]);
 
@@ -12,8 +12,8 @@ export const useOfficerFirestore = (currentLocation: { lat: number; lng: number 
       setDispatch({
         id: incident.id,
         citizenName: incident.citizenName,
-        lat: incident.lat,
-        lng: incident.lng,
+        latitude: incident.latitude || incident.lat || (incident as any).location?.lat,
+        longitude: incident.longitude || incident.lng || (incident as any).location?.lng,
         description: incident.description || 'Emergency SOS',
         status: incident.status
       });
@@ -30,7 +30,7 @@ export const useOfficerFirestore = (currentLocation: { lat: number; lng: number 
     console.log('🛰️ [OFFICER API POLLING ACTIVE] for ID:', officerId);
 
     const pollInterval = setInterval(async () => {
-      const URL = `${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/emergency`;
+      const URL = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/api/emergency`;
       try {
         const response = await fetch(URL, { cache: 'no-store' });
         
@@ -45,15 +45,23 @@ export const useOfficerFirestore = (currentLocation: { lat: number; lng: number 
         const allIncidents: DispatchAlert[] = JSON.parse(text);
         
         const filtered = allIncidents.filter((e) => {
+          const eLat = e.latitude || (e as any).location?.lat || e.lat || 0;
+          const eLng = e.longitude || (e as any).location?.lng || e.lng || 0;
+          
+          // Debug check for swapped coordinates (India specific: Lat ~10-30, Lng ~70-90)
+          if (eLat > 40 && eLng < 40) {
+            console.error(`🚨 [COORD SWAP DETECTED] Incident ${e.id} has suspect coordinates:`, { eLat, eLng });
+          }
+
           const distance = calculateDistance(
-            currentLocation.lat,
-            currentLocation.lng,
-            e.lat || (e as any).location.lat,
-            e.lng || (e as any).location.lng
+            currentLocation.latitude,
+            currentLocation.longitude,
+            eLat,
+            eLng
           );
           (e as any).distanceKm = distance;
           
-          const isNearby = (e.status === 'pending' || e.status === 'searching') && distance <= 3;
+          const isNearby = (e.status === 'pending' || e.status === 'searching') && distance <= 3000; // Allow 3000km for now to debug
           const isAssignedToMe = (e as any).assignedOfficerId === officerId;
           
           return isNearby || isAssignedToMe;
@@ -84,10 +92,10 @@ export const useOfficerFirestore = (currentLocation: { lat: number; lng: number 
       console.log('💡 [IMMEDIATE UI UPDATE]: New SOS', data.id);
       
       const distance = currentLocation ? calculateDistance(
-        currentLocation.lat,
-        currentLocation.lng,
-        data.location.lat,
-        data.location.lng
+        currentLocation.latitude,
+        currentLocation.longitude,
+        data.latitude || data.location?.lat,
+        data.longitude || data.location?.lng
       ) : 0;
       
       const incidentWithDistance = { ...data, distanceKm: distance };
@@ -108,8 +116,8 @@ export const useOfficerFirestore = (currentLocation: { lat: number; lng: number 
         setDispatch({
           id: data.id,
           citizenName: data.citizenName,
-          lat: data.location.lat,
-          lng: data.location.lng,
+          latitude: data.latitude || data.location?.lat,
+          longitude: data.longitude || data.location?.lng,
           description: data.description || 'Emergency SOS',
           status: data.status
         });
@@ -126,7 +134,7 @@ export const useOfficerFirestore = (currentLocation: { lat: number; lng: number 
   }, [currentLocation, officerId, setDispatch, setStatus]);
 
   const acceptEmergency = async (id: string) => {
-    const URL = `${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/emergency/${id}`;
+    const URL = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/api/emergency/${id}`;
     console.log('👆 [ACTION] Accepting via API:', URL);
     try {
       const response = await fetch(URL, {

@@ -53,7 +53,7 @@ function MapController() {
   return null;
 }
 
-const AdminLiveMap = ({ incidents }: AdminMapProps) => {
+const AdminLiveMap = React.memo(({ incidents }: AdminMapProps) => {
   return (
     <div className="w-full h-full relative">
       <style jsx global>{`
@@ -69,13 +69,17 @@ const AdminLiveMap = ({ incidents }: AdminMapProps) => {
         zoomControl={false}
         style={{ width: '100%', height: '100%' }}
       >
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <TileLayer 
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" 
+          updateWhenZooming={false}
+          updateWhenIdle={true}
+        />
         <MapController />
 
-        {incidents.map((incident) => (
+        {incidents.filter(i => i.lat && i.lng).map((incident) => (
           <Marker 
             key={incident.id} 
-            position={[incident.location.lat, incident.location.lng]} 
+            position={[incident.lat, incident.lng]} 
             icon={incidentIcon}
           >
             <Tooltip permanent direction="top" offset={[0, -10]} className="!bg-black/80 !border-red-500/30 !text-white font-black text-[8px] uppercase tracking-widest">
@@ -86,6 +90,6 @@ const AdminLiveMap = ({ incidents }: AdminMapProps) => {
       </MapContainer>
     </div>
   );
-};
+});
 
 export default AdminLiveMap;

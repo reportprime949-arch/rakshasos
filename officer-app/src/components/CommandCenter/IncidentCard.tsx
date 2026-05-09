@@ -9,9 +9,10 @@ interface IncidentCardProps {
   onViewDetails: () => void;
   onAccept: () => void;
   isLoading?: boolean;
+  showAcceptButton?: boolean;
 }
 
-export const IncidentCard = ({ emergency, onViewDetails, onAccept, isLoading }: IncidentCardProps) => {
+export const IncidentCard = ({ emergency, onViewDetails, onAccept, isLoading, showAcceptButton = true }: IncidentCardProps) => {
   const handleAcceptClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     console.log('👆 [ACCEPT BUTTON CLICKED]', emergency.id);
@@ -69,27 +70,29 @@ export const IncidentCard = ({ emergency, onViewDetails, onAccept, isLoading }: 
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className={`grid ${showAcceptButton ? 'grid-cols-2' : 'grid-cols-1'} gap-3`}>
         <button
           onClick={(e) => { e.stopPropagation(); onViewDetails(); }}
           className="h-12 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer"
         >
           Details
         </button>
-        <button
-          onClick={handleAcceptClick}
-          disabled={isLoading}
-          className={`h-12 rounded-2xl bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-[10px] font-black uppercase tracking-widest shadow-[0_0_20px_rgba(34,197,94,0.3)] transition-all cursor-pointer relative overflow-hidden ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-        >
-          {isLoading ? 'CONNECTING...' : 'Accept'}
-          {(emergency.status === 'SEARCHING' || emergency.status === 'PRIORITY') && (
-            <motion.div
-              animate={{ opacity: [0, 0.5, 0], scale: [1, 1.2, 1] }}
-              transition={{ repeat: Infinity, duration: 1 }}
-              className="absolute inset-0 bg-white pointer-events-none"
-            />
-          )}
-        </button>
+        {showAcceptButton && (
+          <button
+            onClick={handleAcceptClick}
+            disabled={isLoading}
+            className={`h-12 rounded-2xl bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-[10px] font-black uppercase tracking-widest shadow-[0_0_20px_rgba(34,197,94,0.3)] transition-all cursor-pointer relative overflow-hidden ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            {isLoading ? 'CONNECTING...' : 'Accept'}
+            {(emergency.status === 'SEARCHING' || emergency.status === 'PRIORITY') && (
+              <motion.div
+                animate={{ opacity: [0, 0.5, 0], scale: [1, 1.2, 1] }}
+                transition={{ repeat: Infinity, duration: 1 }}
+                className="absolute inset-0 bg-white pointer-events-none"
+              />
+            )}
+          </button>
+        )}
       </div>
     </motion.div>
   );

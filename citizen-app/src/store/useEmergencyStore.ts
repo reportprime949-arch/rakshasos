@@ -18,15 +18,15 @@ interface EmergencyState {
   id: string | null;
   status: EmergencyStatus;
   startTime: number | null;
-  location: { lat: number; lng: number } | null;
+  location: { latitude: number; longitude: number } | null;
   lastGPSUpdate: number;
   officer: {
     id?: string;
     name: string;
     badge: string;
     phone: string;
-    lat: number;
-    lng: number;
+    latitude: number;
+    longitude: number;
     eta: string;
   } | null;
   error: string | null;
@@ -34,7 +34,7 @@ interface EmergencyState {
   // Actions
   startCountdown: () => void;
   triggerSOS: (citizenName: string, citizenId: string) => Promise<any>;
-  setLocation: (location: { lat: number; lng: number }) => void;
+  setLocation: (location: { latitude: number; longitude: number }) => void;
   updateStatus: (status: EmergencyStatus) => void;
   assignOfficer: (officer: any) => void;
   cancelEmergency: () => void;
@@ -102,8 +102,8 @@ export const useEmergencyStore = create<EmergencyState>()(
       } catch (err) {
         console.error("⚠️ [GPS FAILED] Using fallback/store coords:", err);
         const storeLocation = get().location;
-        latitude = storeLocation?.lat || 0;
-        longitude = storeLocation?.lng || 0;
+        latitude = storeLocation?.latitude || 0;
+        longitude = storeLocation?.longitude || 0;
       }
 
       const payload = {
@@ -136,7 +136,7 @@ export const useEmergencyStore = create<EmergencyState>()(
         id: data.id,
         status: 'SEARCHING',
         startTime,
-        location: { lat: latitude, lng: longitude },
+        location: { latitude, longitude },
         officer: null,
         error: null,
       });
@@ -200,10 +200,33 @@ export const useEmergencyStore = create<EmergencyState>()(
           return;
         }
 
-        if (data.status === 'resolved' || data.status === 'cancelled') {
-          console.log('🛑 [CITIZEN SYNC] Backend reports resolved/cancelled — completing');
-          set({ status: data.status === 'resolved' ? 'COMPLETED' : 'CANCELLED' });
+        if (data.status === 'resolved' || data.status === 'cancelled' || data.status === 'completed') {
+          console.log('🛑 [CITIZEN SYNC] Backend reports terminal state:', data.status);
+          set({ status: (data.status === 'cancelled') ? 'CANCELLED' : 'COMPLETED', location: null }); // Clear location on completion
           clearInterval(interval);
+          return;
+        }
+
+        if (data.status === 'arrived') {
+          console.log('🚔 [CITIZEN] Officer has ARRIVED at location');
+          const currentOfficer = get().officer;
+          set({
+            status: 'ARRIVED',
+            officer: currentOfficer ? {
+              ...currentOfficer,
+              latitude: data.officerLat || currentOfficer.latitude,
+              longitude: data.officerLng || currentOfficer.longitude,
+            } : {
+              id: data.assignedOfficerId || 'OFF-123',
+              name: data.officerName || 'Officer Response Team',
+              badge: data.officerBadge || 'OFF-9921',
+              phone: '+1 555-0123',
+              latitude: data.officerLat || (data.latitude || 0) + 0.005,
+              longitude: data.officerLng || (data.longitude || 0) + 0.005,
+              eta: 'Arrived',
+            }
+          });
+          // Do NOT stop polling — wait for 'resolved'
           return;
         }
 
@@ -216,13 +239,13 @@ export const useEmergencyStore = create<EmergencyState>()(
               name: data.officerName || 'Officer Response Team',
               badge: data.officerBadge || 'OFF-9921',
               phone: '+1 555-0123',
-              lat: data.officerLat || (data.location?.lat || 0) + 0.005,
-              lng: data.officerLng || (data.location?.lng || 0) + 0.005,
+              latitude: data.officerLat || (data.latitude || 0) + 0.005,
+              longitude: data.officerLng || (data.longitude || 0) + 0.005,
               eta: '4 Min',
             }
           });
         }
-      }, 3000);
+      }, 10000);
 
       return () => {
         console.log('🛑 [CITIZEN SYNC] Cleanup — clearing polling interval');

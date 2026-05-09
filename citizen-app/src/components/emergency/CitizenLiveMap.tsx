@@ -6,8 +6,8 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
 interface MapProps {
-  officerLoc: { lat: number; lng: number } | null;
-  citizenLoc: { lat: number; lng: number } | null;
+  officerLoc: { latitude: number; longitude: number } | null;
+  citizenLoc: { latitude: number; longitude: number } | null;
   status: string;
 }
 
@@ -17,17 +17,17 @@ function MapController({ officerLoc, citizenLoc, status }: MapProps) {
   useEffect(() => {
     if (officerLoc && citizenLoc) {
       const bounds = L.latLngBounds([
-        [officerLoc.lat, officerLoc.lng],
-        [citizenLoc.lat, citizenLoc.lng]
+        [officerLoc.latitude, officerLoc.longitude],
+        [citizenLoc.latitude, citizenLoc.longitude]
       ]);
       map.fitBounds(bounds, { padding: [50, 50], animate: true });
     }
-  }, [officerLoc?.lat, officerLoc?.lng, citizenLoc?.lat, citizenLoc?.lng, map]);
+  }, [officerLoc?.latitude, officerLoc?.longitude, citizenLoc?.latitude, citizenLoc?.longitude, map]);
 
   return null;
 }
 
-const CitizenLiveMap = ({ officerLoc, citizenLoc, status }: MapProps) => {
+const CitizenLiveMap = React.memo(({ officerLoc, citizenLoc, status }: MapProps) => {
   const [route, setRoute] = useState<any>(null);
 
   useEffect(() => {
@@ -81,13 +81,15 @@ const CitizenLiveMap = ({ officerLoc, citizenLoc, status }: MapProps) => {
     const fetchRoute = async () => {
       if (!officerLoc || !citizenLoc || status === 'COMPLETED') return;
       try {
-        const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${officerLoc.lng},${officerLoc.lat};${citizenLoc.lng},${citizenLoc.lat}?overview=full&geometries=geojson`);
+        const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${officerLoc.longitude},${officerLoc.latitude};${citizenLoc.longitude},${citizenLoc.latitude}?overview=full&geometries=geojson`);
         const data = await res.json();
         if (data.routes?.[0]) setRoute(data.routes[0]);
       } catch (e) {}
     };
-    fetchRoute();
-  }, [officerLoc, citizenLoc, status]);
+    // Debounce route fetch to prevent rapid requests
+    const timer = setTimeout(fetchRoute, 3000);
+    return () => clearTimeout(timer);
+  }, [officerLoc?.latitude, officerLoc?.longitude, citizenLoc?.latitude, citizenLoc?.longitude, status]);
 
   const routeCoords = useMemo(() => {
     if (!route) return [];
@@ -111,7 +113,11 @@ const CitizenLiveMap = ({ officerLoc, citizenLoc, status }: MapProps) => {
         style={{ width: '100%', height: '100%' }}
         zoomControl={false}
       >
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <TileLayer 
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" 
+          updateWhenZooming={false}
+          updateWhenIdle={true}
+        />
         <MapController officerLoc={officerLoc} citizenLoc={citizenLoc} status={status} />
 
         {routeCoords.length > 0 && (
@@ -127,15 +133,15 @@ const CitizenLiveMap = ({ officerLoc, citizenLoc, status }: MapProps) => {
         )}
 
         {officerLoc && officerIcon && (
-          <Marker position={[officerLoc.lat, officerLoc.lng]} icon={officerIcon} />
+          <Marker position={[officerLoc.latitude, officerLoc.longitude]} icon={officerIcon} />
         )}
 
         {citizenLoc && citizenIcon && (
-          <Marker position={[citizenLoc.lat, citizenLoc.lng]} icon={citizenIcon} />
+          <Marker position={[citizenLoc.latitude, citizenLoc.longitude]} icon={citizenIcon} />
         )}
       </MapContainer>
     </div>
   );
-};
+});
 
 export default CitizenLiveMap;

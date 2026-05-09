@@ -4,7 +4,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { Circle, CheckCircle2 } from 'lucide-react';
 
-export const IncidentTimeline = ({ status }: { status: string }) => {
+export const IncidentTimeline = React.memo(({ status }: { status: string }) => {
   const steps = [
     { id: 'SOS_TRIGGERED', label: 'SOS Triggered' },
     { id: 'ALERT_RECEIVED', label: 'Alert Received' },
@@ -51,4 +51,4 @@ export const IncidentTimeline = ({ status }: { status: string }) => {
       </div>
     </div>
   );
-};
+});

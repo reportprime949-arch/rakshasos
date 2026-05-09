@@ -98,7 +98,7 @@ export default function CitizenHome() {
 
   // Sync GPS coordinates to store
   useEffect(() => {
-    if (coords) setLocation({ lat: coords.latitude, lng: coords.longitude });
+    if (coords) setLocation({ latitude: coords.latitude, longitude: coords.longitude });
   }, [coords, setLocation]);
 
 
@@ -288,8 +288,8 @@ export default function CitizenHome() {
                 <div className="mt-8 h-40 rounded-[2.5rem] overflow-hidden border border-white/5 relative group-hover:border-green-500/20 transition-colors">
                   <div className="absolute inset-0 z-10 bg-gradient-to-t from-black/40 to-transparent pointer-events-none" />
                   <CitizenLiveMap 
-                    officerLoc={{ lat: officer?.lat || 17.3850, lng: officer?.lng || 78.4867 }}
-                    citizenLoc={coords ? { lat: coords.latitude, lng: coords.longitude } : { lat: 17.3850, lng: 78.4867 }}
+                    officerLoc={{ latitude: officer?.latitude || 17.3850, longitude: officer?.longitude || 78.4867 }}
+                    citizenLoc={coords ? { latitude: coords.latitude, longitude: coords.longitude } : { latitude: 17.3850, longitude: 78.4867 }}
                     status="COMPLETED"
                   />
                   <div className="absolute bottom-4 left-6 z-20 flex items-center space-x-2">
@@ -347,8 +347,8 @@ export default function CitizenHome() {
                   {status !== 'SEARCHING' && officer ? (
                     <div className="absolute inset-0">
                       <CitizenLiveMap 
-                        officerLoc={{ lat: officer.lat, lng: officer.lng }} 
-                        citizenLoc={coords ? { lat: coords.latitude, lng: coords.longitude } : null}
+                        officerLoc={{ latitude: officer.latitude, longitude: officer.longitude }} 
+                        citizenLoc={coords ? { latitude: coords.latitude, longitude: coords.longitude } : null}
                         status={status}
                       />
                       <div className="absolute top-6 left-6 z-10 glass px-4 py-2 rounded-xl border border-white/10 flex items-center space-x-2">

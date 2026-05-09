@@ -5,9 +5,13 @@ export interface EmergencySession {
   status: string;
   latitude: number;
   longitude: number;
-  citizen: { name: string; phone: string };
+  lat: number;
+  lng: number;
+  citizenName?: string;
+  citizen?: { name: string; phone: string };
   officer?: { user: { name: string; badgeNumber: string } };
   createdAt: string;
+  emergencyType?: string;
 }
 
 interface AdminState {
