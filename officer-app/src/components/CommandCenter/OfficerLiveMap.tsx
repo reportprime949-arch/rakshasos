@@ -122,7 +122,7 @@ const OfficerLiveMap = React.memo(({ officerLoc, citizenLoc, active, incidents =
 
     routeTimerRef.current = setTimeout(async () => {
       try {
-        const url = `https://router.project-osrm.org/route/v1/driving/${officerLoc.longitude},${officerLoc.latitude};${cLng},${cLat}?overview=full&geometries=geojson`;
+        const url = `https://router.project-osrm.org/route/v1/driving/${officerLoc.longitude},${officerLoc.latitude};${cLng},${cLat}?overview=full&geometries=geojson&steps=true&annotations=true`;
         console.log("🗺️ [OSRM REQUEST]:", url);
         
         const res = await fetch(url);
@@ -138,7 +138,7 @@ const OfficerLiveMap = React.memo(({ officerLoc, citizenLoc, active, incidents =
       } catch (e) { 
         console.error('🔴 [ROUTING ERROR]:', e); 
       }
-    }, isInitialLoad ? 0 : 3000);
+    }, isInitialLoad ? 0 : 2000); // More frequent updates for "Uber-like" feel
 
     return () => {
       if (routeTimerRef.current) clearTimeout(routeTimerRef.current);
@@ -148,6 +148,7 @@ const OfficerLiveMap = React.memo(({ officerLoc, citizenLoc, active, incidents =
   const currentRoute = routes[0];
   const eta = currentRoute ? `${Math.round(currentRoute.duration / 60)} MIN` : 'CALC...';
   const distance = currentRoute ? `${(currentRoute.distance / 1000).toFixed(1)} KM` : '---';
+  const nextStep = currentRoute?.legs?.[0]?.steps?.[0]?.maneuver?.instruction || 'Proceed to target';
 
   const routeCoords = useMemo(() => {
     if (!currentRoute) return [];
@@ -220,8 +221,8 @@ const OfficerLiveMap = React.memo(({ officerLoc, citizenLoc, active, incidents =
       <div className="absolute inset-0 z-[400] pointer-events-none bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.4)_100%)]" />
 
       <MapContainer
-        center={[17.3850, 78.4867]}
-        zoom={14}
+        center={[officerLoc?.latitude || 20, officerLoc?.longitude || 78]}
+        zoom={officerLoc ? 15 : 4}
         zoomControl={false}
         style={{ width: '100%', height: '100%' }}
       >
@@ -340,24 +341,35 @@ const OfficerLiveMap = React.memo(({ officerLoc, citizenLoc, active, incidents =
             exit={{ y: 100, opacity: 0 }}
             className="absolute bottom-12 left-1/2 -translate-x-1/2 z-[1000] pointer-events-auto"
           >
-            <div className="glass px-16 py-8 rounded-[3.5rem] border border-blue-500/20 bg-black/60 backdrop-blur-3xl flex items-center space-x-20 shadow-[0_40px_100px_rgba(0,0,0,0.8)] relative overflow-hidden group">
+            <div className="glass px-12 py-6 rounded-[3rem] border border-blue-500/20 bg-black/80 backdrop-blur-3xl flex items-center space-x-12 shadow-[0_40px_100px_rgba(0,0,0,0.8)] relative overflow-hidden group">
               <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 via-transparent to-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
               
-              <div className="text-center relative">
-                <p className="text-[10px] font-black uppercase tracking-[0.4em] text-blue-400 mb-1">Time to Target</p>
-                <h4 className="text-4xl font-black italic tracking-tighter text-white uppercase">{eta}</h4>
+              <div className="flex flex-col">
+                <p className="text-[8px] font-black uppercase tracking-[0.4em] text-blue-500 mb-2">Next Maneuver</p>
+                <h4 className="text-sm font-black text-white uppercase italic max-w-[200px] truncate">{nextStep}</h4>
               </div>
-              <div className="h-14 w-px bg-white/10" />
-              <div className="text-center relative">
-                <p className="text-[10px] font-black uppercase tracking-[0.4em] text-gray-500 mb-1">Vector Length</p>
-                <h4 className="text-4xl font-black italic tracking-tighter text-white uppercase">{distance}</h4>
+
+              <div className="h-10 w-px bg-white/10" />
+
+              <div className="text-center">
+                <p className="text-[8px] font-black uppercase tracking-[0.4em] text-gray-500 mb-1">ETA</p>
+                <h4 className="text-2xl font-black italic tracking-tighter text-white uppercase">{eta}</h4>
               </div>
-              <div className="h-14 w-px bg-white/10" />
-              <div className="flex flex-col items-center relative">
-                <div className="w-12 h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center border border-blue-500/20 mb-2 animate-bounce">
-                  <Navigation className="text-blue-500" size={24} />
+
+              <div className="h-10 w-px bg-white/10" />
+
+              <div className="text-center">
+                <p className="text-[8px] font-black uppercase tracking-[0.4em] text-gray-500 mb-1">Dist</p>
+                <h4 className="text-2xl font-black italic tracking-tighter text-white uppercase">{distance}</h4>
+              </div>
+
+              <div className="h-10 w-px bg-white/10" />
+
+              <div className="flex flex-col items-center">
+                <div className="w-10 h-10 rounded-2xl bg-blue-500/10 flex items-center justify-center border border-blue-500/20 mb-1 animate-bounce">
+                  <Navigation className="text-blue-500" size={20} />
                 </div>
-                <p className="text-[8px] font-black text-blue-500 uppercase tracking-[0.3em]">Directing Now</p>
+                <p className="text-[6px] font-black text-blue-500 uppercase tracking-[0.3em]">Live</p>
               </div>
             </div>
           </motion.div>

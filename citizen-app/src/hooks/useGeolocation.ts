@@ -55,17 +55,23 @@ export const useGeolocation = () => {
   }, []);
 
   const startTracking = useCallback(() => {
-    if (!navigator.geolocation) return;
+    if (typeof window === 'undefined' || !navigator.geolocation) {
+      setState(prev => ({ ...prev, loading: false, error: 'Geolocation not supported' }));
+      return;
+    }
 
     if (watchId.current !== null) {
       navigator.geolocation.clearWatch(watchId.current);
     }
 
-    watchId.current = navigator.geolocation.watchPosition(updateLocation, handleError, {
+    // PHASE 1: REQUIRED SETTINGS
+    const options = {
       enableHighAccuracy: true,
-      timeout: 5000,
+      timeout: 15000,
       maximumAge: 0,
-    });
+    };
+
+    watchId.current = navigator.geolocation.watchPosition(updateLocation, handleError, options);
   }, [updateLocation, handleError]);
 
   // Aggressive retry logic

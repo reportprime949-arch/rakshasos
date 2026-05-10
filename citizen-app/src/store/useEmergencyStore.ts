@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { db } from '@/lib/firebase';
-import { doc, setDoc, serverTimestamp, collection, getDocs, query, where } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, collection, getDocs, query, where, onSnapshot } from 'firebase/firestore';
 import { calculateDistance } from '@/utils/distance';
 import { API_URL, safeFetch } from '@/lib/api';
 
@@ -165,91 +165,61 @@ export const useEmergencyStore = create<EmergencyState>()(
 
     syncWithFirestore: () => {
       const id = get().id;
-      if (!id) {
-        console.log('⚠️ [CITIZEN SYNC] No active SOS ID — skipping polling');
-        return () => {};
-      }
+      if (!id) return () => {};
 
-      console.log('📡 [CITIZEN SYNC] Starting polling for:', id);
+      console.log('📡 [CITIZEN SYNC] Starting Realtime Sync for:', id);
 
-      const interval = setInterval(async () => {
-        const currentStatus = get().status;
-
-        // Stop polling if we've reached a terminal state
-        if (TERMINAL_STATUSES.includes(currentStatus)) {
-          console.log('🛑 [CITIZEN SYNC] Terminal state reached, stopping polling:', currentStatus);
-          clearInterval(interval);
-          return;
-        }
-
-        const { ok, data, status } = await safeFetch(`${API_URL}/api/emergency/${id}`);
-
-        if (!ok) {
-          if (status === 404) {
-            console.log('🧹 [CITIZEN RESET] Emergency not found on backend — resetting');
-            get().reset();
-            clearInterval(interval);
-          }
-          return;
-        }
-
-        if (!data || !data.status) {
-          console.log('🧹 [CITIZEN RESET] Empty API response — closing modal');
+      const unsub = onSnapshot(doc(db, 'emergencies', id), (docSnap) => {
+        if (!docSnap.exists()) {
+          console.log('🧹 [CITIZEN RESET] Emergency not found — resetting');
           get().reset();
-          clearInterval(interval);
           return;
         }
 
-        if (data.status === 'resolved' || data.status === 'cancelled' || data.status === 'completed') {
-          console.log('🛑 [CITIZEN SYNC] Backend reports terminal state:', data.status);
-          set({ status: (data.status === 'cancelled') ? 'CANCELLED' : 'COMPLETED', location: null }); // Clear location on completion
-          clearInterval(interval);
+        const data = docSnap.data();
+        const status = data.status?.toLowerCase();
+
+        if (status === 'resolved' || status === 'cancelled' || status === 'completed') {
+          console.log('🛑 [CITIZEN SYNC] Terminal state reached:', status);
+          set({ status: (status === 'cancelled') ? 'CANCELLED' : 'COMPLETED', location: null });
           return;
         }
 
-        if (data.status === 'arrived') {
-          console.log('🚔 [CITIZEN] Officer has ARRIVED at location');
-          const currentOfficer = get().officer;
+        if (status === 'arrived' || status === 'assigned' || status === 'enroute') {
           set({
-            status: 'ARRIVED',
-            officer: currentOfficer ? {
-              ...currentOfficer,
-              latitude: data.officerLat || currentOfficer.latitude,
-              longitude: data.officerLng || currentOfficer.longitude,
-            } : {
-              id: data.assignedOfficerId || 'OFF-123',
-              name: data.officerName || 'Officer Response Team',
-              badge: data.officerBadge || 'OFF-9921',
-              phone: '+1 555-0123',
-              latitude: data.officerLat || (data.latitude || 0) + 0.005,
-              longitude: data.officerLng || (data.longitude || 0) + 0.005,
-              eta: 'Arrived',
-            }
-          });
-          // Do NOT stop polling — wait for 'resolved'
-          return;
-        }
-
-        if (data.status === 'assigned' || data.status === 'enroute' || data.status === 'arrived') {
-          console.log('🚔 [CITIZEN ACTIVE SOS FOUND] Officer responding:', data.status);
-          set({
-            status: data.status.toUpperCase() as EmergencyStatus,
+            status: status === 'enroute' ? 'EN_ROUTE' : status.toUpperCase() as EmergencyStatus,
             officer: {
               id: data.assignedOfficerId || 'OFF-123',
               name: data.officerName || 'Officer Response Team',
               badge: data.officerBadge || 'OFF-9921',
-              phone: '+1 555-0123',
-              latitude: data.officerLat || (data.latitude || 0) + 0.005,
-              longitude: data.officerLng || (data.longitude || 0) + 0.005,
-              eta: '4 Min',
+              phone: data.officerPhone || '+1 555-0123',
+              latitude: data.officerLat || 0,
+              longitude: data.officerLng || 0,
+              eta: data.eta || 'Calculating...',
             }
           });
         }
-      }, 10000);
+      });
+
+      // PHASE 1: PUSH LIVE GPS UPDATES
+      const gpsInterval = setInterval(async () => {
+        const { location, status } = get();
+        if (location && !TERMINAL_STATUSES.includes(status)) {
+          try {
+            await setDoc(doc(db, 'emergencies', id), {
+              latitude: location.latitude,
+              longitude: location.longitude,
+              updatedAt: serverTimestamp()
+            }, { merge: true });
+          } catch (err) {
+            console.error('🛰️ [GPS PUSH ERROR]', err);
+          }
+        }
+      }, 5000);
 
       return () => {
-        console.log('🛑 [CITIZEN SYNC] Cleanup — clearing polling interval');
-        clearInterval(interval);
+        unsub();
+        clearInterval(gpsInterval);
       };
     }
   })

@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useOfficerStore, DispatchAlert } from '@/store/useOfficerStore';
 import { calculateDistance } from '@/utils/distance';
+import { db } from '@/lib/firebase';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 
 export const useOfficerFirestore = (currentLocation: { latitude: number; longitude: number } | null) => {
   const { setDispatch, isOnline, activeDispatch, setStatus, officerId, officerName } = useOfficerStore();
@@ -27,62 +29,52 @@ export const useOfficerFirestore = (currentLocation: { latitude: number; longitu
       return;
     }
 
-    console.log('🛰️ [OFFICER API POLLING ACTIVE] for ID:', officerId);
+    // PHASE 5: REALTIME FIRESTORE SYNC
+    const emergenciesRef = collection(db, 'emergencies');
+    const q = query(
+      emergenciesRef, 
+      where('status', 'in', ['pending', 'searching', 'assigned', 'enroute', 'arrived'])
+    );
 
-    const pollInterval = setInterval(async () => {
-      const URL = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/api/emergency`;
-      try {
-        const response = await fetch(URL, { cache: 'no-store' });
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const allIncidents: DispatchAlert[] = [];
+      snapshot.forEach((doc) => {
+        allIncidents.push({ id: doc.id, ...doc.data() } as DispatchAlert);
+      });
+
+      const filtered = allIncidents.filter((e) => {
+        const eLat = e.latitude || (e as any).location?.lat || e.lat || 0;
+        const eLng = e.longitude || (e as any).location?.lng || e.lng || 0;
         
-        if (!response.ok) {
-          console.warn('⚠️ [POLLING FAILED] Status:', response.status);
-          return;
-        }
-
-        const text = await response.text();
-        if (!text) return;
-
-        const allIncidents: DispatchAlert[] = JSON.parse(text);
-        
-        const filtered = allIncidents.filter((e) => {
-          const eLat = e.latitude || (e as any).location?.lat || e.lat || 0;
-          const eLng = e.longitude || (e as any).location?.lng || e.lng || 0;
-          
-          // Debug check for swapped coordinates (India specific: Lat ~10-30, Lng ~70-90)
-          if (eLat > 40 && eLng < 40) {
-            console.error(`🚨 [COORD SWAP DETECTED] Incident ${e.id} has suspect coordinates:`, { eLat, eLng });
-          }
-
-          const distance = calculateDistance(
-            currentLocation.latitude,
-            currentLocation.longitude,
-            eLat,
-            eLng
-          );
-          (e as any).distanceKm = distance;
-          
-          const isNearby = (e.status === 'pending' || e.status === 'searching') && distance <= 3000; // Allow 3000km for now to debug
-          const isAssignedToMe = (e as any).assignedOfficerId === officerId;
-          
-          return isNearby || isAssignedToMe;
-        });
-
-        setPendingEmergencies(filtered);
-        
-        const myActiveIncident = filtered.find((e) => 
-          (e as any).assignedOfficerId === officerId && 
-          ['assigned', 'enroute', 'arrived'].includes(e.status)
+        const distance = calculateDistance(
+          currentLocation.latitude,
+          currentLocation.longitude,
+          eLat,
+          eLng
         );
+        (e as any).distanceKm = distance;
+        
+        const isNearby = (e.status === 'pending' || e.status === 'searching') && distance <= 50; // 50km radius
+        const isAssignedToMe = (e as any).assignedOfficerId === officerId;
+        
+        return isNearby || isAssignedToMe;
+      });
 
-        if (myActiveIncident) {
-          syncDispatch(myActiveIncident);
-        }
-      } catch (error) {
-        console.error('🔴 [POLLING ERROR]:', error);
+      setPendingEmergencies(filtered);
+      
+      const myActiveIncident = filtered.find((e) => 
+        (e as any).assignedOfficerId === officerId && 
+        ['assigned', 'enroute', 'arrived'].includes(e.status)
+      );
+
+      if (myActiveIncident) {
+        syncDispatch(myActiveIncident);
       }
-    }, 5000);
+    }, (error) => {
+      console.error('🔴 [FIRESTORE SYNC ERROR]:', error);
+    });
 
-    return () => clearInterval(pollInterval);
+    return () => unsubscribe();
   }, [isOnline, currentLocation, officerId, syncDispatch]);
 
   useEffect(() => {

@@ -17,7 +17,7 @@ const CitizenLiveMap = dynamic(() => import('@/components/emergency/CitizenLiveM
 });
 
 export default function CitizenHome() {
-  const { coords, permissionStatus, requestPermission } = useGeolocation();
+  const { coords, error, loading, permissionStatus, requestPermission, openSettings } = useGeolocation();
   const { 
     id, 
     status, 
@@ -34,25 +34,22 @@ export default function CitizenHome() {
   // Connect to realtime server
   const socket = useSocket('citizen-test-token');
 
+  // === PHASE 1: MANDATORY GPS ACCESS ===
+  const isGpsDenied = permissionStatus === 'denied' || error === 'PERMISSION_DENIED';
+  const isGpsLoading = loading && !coords;
+  const canTriggerSos = coords !== null && !isGpsDenied;
+
   // === CRITICAL: Purge stale emergency state on mount ===
-  // The old store used zustand/persist which saved SOS state to localStorage.
-  // On page load, we must guarantee IDLE state unless the user presses SOS.
   useEffect(() => {
-    // Remove any leftover persistence keys from previous sessions
     try {
       localStorage.removeItem('rakshasos-emergency-session');
       localStorage.removeItem('activeSOS');
       localStorage.removeItem('activeEmergency');
     } catch { /* SSR guard */ }
 
-    // If the store somehow loaded with a non-IDLE status (shouldn't happen
-    // now that persist is removed, but this is a safety net), force reset.
     const currentStatus = useEmergencyStore.getState().status;
     if (currentStatus !== 'IDLE') {
-      console.log('🧹 [CITIZEN RESET] Stale state found on mount:', currentStatus, '— forcing IDLE');
       useEmergencyStore.getState().reset();
-    } else {
-      console.log('✅ [CITIZEN] App loaded cleanly in IDLE state');
     }
   }, []);
 
@@ -65,10 +62,9 @@ export default function CitizenHome() {
         timer = setTimeout(() => setCountdown(prev => prev - 1), 1000);
       } else {
         const handleSOS = async () => {
+          if (!coords) return; // Final safety check
           try {
              const result = await triggerSOS('Test Citizen', 'CIT-12345');
-             requestPermission();
-          
              if (result?.success) {
                 router.push("/alert-sent");
              } else {
@@ -85,12 +81,11 @@ export default function CitizenHome() {
       setCountdown(3);
     }
     return () => clearTimeout(timer);
-  }, [status, countdown, triggerSOS, requestPermission, router]);
+  }, [status, countdown, triggerSOS, router, coords]);
 
   // Start polling when an active SOS exists
   useEffect(() => {
     if (id) {
-      console.log('📡 [CITIZEN] Active SOS detected, starting sync:', id);
       const unsub = useEmergencyStore.getState().syncWithFirestore();
       return () => unsub();
     }
@@ -101,11 +96,35 @@ export default function CitizenHome() {
     if (coords) setLocation({ latitude: coords.latitude, longitude: coords.longitude });
   }, [coords, setLocation]);
 
-
   return (
     <main className={`min-h-screen transition-colors duration-1000 flex flex-col overflow-hidden ${
       status === 'COMPLETED' ? 'bg-[#001219]' : 'bg-black'
     }`}>
+      {/* PHASE 1: FULLSCREEN PERMISSION WARNING */}
+      <AnimatePresence>
+        {isGpsDenied && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="fixed inset-0 z-[1000] bg-black/95 backdrop-blur-xl flex flex-col items-center justify-center p-8 text-center"
+          >
+            <div className="w-24 h-24 rounded-full bg-red-500/20 flex items-center justify-center mb-8 border-2 border-red-500/50">
+              <MapPin className="text-red-500" size={48} />
+            </div>
+            <h2 className="text-3xl font-black italic tracking-tighter text-white uppercase mb-4">Location Required</h2>
+            <p className="text-gray-400 text-sm mb-12 max-w-xs leading-relaxed">
+              RakshaSOS requires precise GPS tracking to send emergency services to your exact location. We cannot trigger an SOS without it.
+            </p>
+            <button
+              onClick={openSettings}
+              className="px-12 py-5 bg-red-600 rounded-full text-xs font-black uppercase tracking-[0.3em] text-white shadow-[0_0_50px_rgba(220,38,38,0.3)]"
+            >
+              Enable GPS Access
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Dynamic Background Glow */}
       <AnimatePresence>
         {status !== 'IDLE' && status !== 'COMPLETED' && (
@@ -145,19 +164,36 @@ export default function CitizenHome() {
               ) : (
                 <button
                   onClick={startCountdown}
-                  className="emergency-btn pulse w-72 h-72 rounded-full flex flex-col items-center justify-center space-y-2 group active:scale-95 transition-transform"
+                  disabled={!canTriggerSos}
+                  className={`emergency-btn w-72 h-72 rounded-full flex flex-col items-center justify-center space-y-2 transition-all ${
+                    canTriggerSos ? 'pulse scale-100 opacity-100' : 'opacity-40 grayscale scale-95 cursor-not-allowed'
+                  }`}
                 >
                   <span className="text-5xl font-black text-white">SOS</span>
-                  <p className="text-[10px] font-bold text-white/60 uppercase tracking-widest">Tap to Alert</p>
+                  <p className="text-[10px] font-bold text-white/60 uppercase tracking-widest">
+                    {isGpsLoading ? 'Locking GPS...' : 'Tap to Alert'}
+                  </p>
                 </button>
               )}
             </div>
 
-            <div className="pt-12 flex items-center space-x-2 text-gray-700">
-              <div className={`w-2 h-2 rounded-full ${permissionStatus === 'granted' ? 'bg-green-500' : 'bg-amber-500'}`} />
-              <span className="text-[10px] font-bold uppercase tracking-widest">
-                GPS: {permissionStatus === 'granted' ? 'Active' : 'Standby'}
-              </span>
+            <div className="pt-12 flex flex-col items-center space-y-4">
+               <div className="flex items-center space-x-2 text-gray-700">
+                <div className={`w-2 h-2 rounded-full ${permissionStatus === 'granted' ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,1)]' : 'bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,1)]'}`} />
+                <span className="text-[10px] font-black uppercase tracking-widest">
+                  Signal: {permissionStatus === 'granted' ? 'High Accuracy' : 'Standby'}
+                </span>
+              </div>
+              
+              {!canTriggerSos && !isGpsDenied && (
+                <motion.p 
+                  animate={{ opacity: [0.3, 1, 0.3] }}
+                  transition={{ repeat: Infinity, duration: 2 }}
+                  className="text-[10px] font-black text-gray-500 uppercase tracking-widest text-center"
+                >
+                  Acquiring secure GPS signal...
+                </motion.p>
+              )}
             </div>
           </motion.div>
         ) : status === 'COMPLETED' ? (

@@ -29,20 +29,19 @@ export const useOfficerLocation = (
   useEffect(() => {
     if (!isOnline) return;
 
-    const mockCoords = { latitude: 17.3850, longitude: 78.4867 };
-
+    // PHASE 2: STRICT REAL GPS ONLY
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
         const newLoc = { latitude, longitude };
-        console.log("LAT:", latitude);
-        console.log("LNG:", longitude);
+        
+        console.log("🛰️ [GPS UPDATE] LAT:", latitude, "LNG:", longitude);
         setLocation(newLoc);
         setLocationError(null);
         
-        // Only emit via socket if position changed by >10 meters
+        // Emit via socket if position changed by >5 meters for smooth movement
         const last = lastEmittedRef.current;
-        if (!last || distanceMeters(last.latitude, last.longitude, newLoc.latitude, newLoc.longitude) > 10) {
+        if (!last || distanceMeters(last.latitude, last.longitude, newLoc.latitude, newLoc.longitude) > 5) {
           lastEmittedRef.current = newLoc;
           if (emitLocationUpdate) {
             emitLocationUpdate({ officerId, ...newLoc });
@@ -50,33 +49,33 @@ export const useOfficerLocation = (
         }
       },
       (error) => {
-        console.warn('🛰️ [GPS ERROR]', error.message);
-        if (error.code === error.PERMISSION_DENIED) {
-          setLocationError("Location permission denied.");
-        } else {
-          setLocationError("Location unavailable.");
-        }
-        setLocation(mockCoords);
+        console.warn('🚨 [OFFICER GPS ERROR]', error.message);
+        let msg = "Location unavailable.";
+        if (error.code === error.PERMISSION_DENIED) msg = "Location permission denied.";
+        else if (error.code === error.TIMEOUT) msg = "GPS Signal Timeout.";
+        
+        setLocationError(msg);
+        // DO NOT use mock coords here. If GPS fails, it fails.
       },
       { 
         enableHighAccuracy: true, 
-        timeout: 10000, 
-        // Allow cached position up to 5 seconds — reduces GPS battery drain
-        maximumAge: 5000 
+        timeout: 15000, 
+        maximumAge: 0 
       }
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
   }, [isOnline, officerId, emitLocationUpdate]);
 
-  // Throttled Firestore sync — every 15 seconds, only if position changed >20m
+  // Throttled Firestore sync — every 5 seconds for "Uber-like" smoothness
   useEffect(() => {
     if (!isOnline || !location) return;
 
     const updateFirestore = async () => {
       const last = lastFirestoreRef.current;
-      if (last && distanceMeters(last.latitude, last.longitude, location.latitude, location.longitude) < 20) {
-        return; // Skip if position hasn't changed significantly
+      // Update Firestore if position changed >10m
+      if (last && distanceMeters(last.latitude, last.longitude, location.latitude, location.longitude) < 10) {
+        return; 
       }
       
       lastFirestoreRef.current = location;
@@ -88,20 +87,20 @@ export const useOfficerLocation = (
           name,
           latitude: location.latitude,
           longitude: location.longitude,
-          lat: location.latitude, // For backward compatibility
-          lng: location.longitude, // For backward compatibility
-          active: isBusy, // Set active based on whether they have a dispatch
+          lat: location.latitude, 
+          lng: location.longitude, 
+          active: isBusy,
           onDuty: isOnline,
           currentIncidentId: useOfficerStore.getState().activeDispatch?.id || null,
           updatedAt: serverTimestamp(),
         }, { merge: true });
-      } catch {
-        console.error('🛰️ [GPS] Firestore sync failed');
+        console.log('🔥 [FIREBASE] Officer Location Synced');
+      } catch (err) {
+        console.error('🛰️ [GPS] Firestore sync failed:', err);
       }
     };
 
-    // Throttle Firestore updates to every 15 seconds
-    const interval = setInterval(updateFirestore, 15000);
+    const interval = setInterval(updateFirestore, 5000);
     updateFirestore();
 
     return () => clearInterval(interval);
