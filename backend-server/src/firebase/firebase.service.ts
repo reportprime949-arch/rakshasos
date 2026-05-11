@@ -1,6 +1,5 @@
-import * as admin from 'firebase-admin';import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import * as admin from 'firebase-admin';
-
 @Injectable()
 export class FirebaseService implements OnModuleInit {
   private firebaseApp: admin.app.App;
@@ -9,9 +8,9 @@ export class FirebaseService implements OnModuleInit {
     try {
       if (!admin.apps.length) {
         if (!process.env.FIREBASE_PRIVATE_KEY || process.env.FIREBASE_PRIVATE_KEY === 'your-private-key') {
-           throw new Error('Firebase credentials not configured');
+          throw new Error('Firebase credentials not configured');
         }
-        
+
         this.firebaseApp = admin.initializeApp({
           credential: admin.credential.cert({
             projectId: process.env.FIREBASE_PROJECT_ID,
@@ -34,9 +33,9 @@ export class FirebaseService implements OnModuleInit {
     return admin.firestore();
   }
 
- getMessaging(): admin.messaging.Messaging {
-  return admin.messaging();
-}
+  getMessaging(): admin.messaging.Messaging {
+    return admin.messaging();
+  }
 
   async sendPushNotification(token: string, title: string, body: string, data?: any) {
     if (!this.firebaseApp) {
