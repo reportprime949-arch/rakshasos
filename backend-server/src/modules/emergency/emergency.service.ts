@@ -64,7 +64,7 @@ export class EmergencyService {
         latitude: lat,
         longitude: lng,
         createdAt: new Date().toISOString(),
-        timestamp: ts,
+        timestamp: Date.now(),
         status: 'pending',
       };
 
