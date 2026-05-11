@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import * as admin from 'firebase-admin';import { Injectable, OnModuleInit } from '@nestjs/common';
 import * as admin from 'firebase-admin';
 
 @Injectable()
@@ -34,10 +34,9 @@ export class FirebaseService implements OnModuleInit {
     return admin.firestore();
   }
 
-  getMessaging() {
-    if (!this.firebaseApp) return null;
-    return admin.messaging();
-  }
+ getMessaging(): admin.messaging.Messaging {
+  return admin.messaging();
+}
 
   async sendPushNotification(token: string, title: string, body: string, data?: any) {
     if (!this.firebaseApp) {
