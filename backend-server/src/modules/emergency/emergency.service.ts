@@ -20,20 +20,31 @@ export class EmergencyService {
 
   async createSOS(data: any) {
     const now = Date.now();
-    const ts = data.timestamp || now;
-    const fingerprint = `${data.citizenName}-${data.emergencyType}-${ts}`;
+    const citizenId = data.citizenId || 'UNKNOWN';
+    const fingerprint = `${citizenId}-${data.emergencyType}`;
 
-    this.logger.log(`🚨 [CREATE SOS] Incoming: ${data.citizenName} at ${data.latitude},${data.longitude}`);
+    this.logger.log(`🚨 [CREATE SOS] Incoming: ${data.citizenName} (${citizenId}) at ${data.latitude},${data.longitude}`);
 
+    // 1. Cleanup old fingerprints
     for (const [key, val] of this.recentFingerprints.entries()) {
-      if (now - val.createdAt > this.DEDUP_WINDOW_MS) this.recentFingerprints.delete(key);
+      if (now - val.createdAt > 20000) this.recentFingerprints.delete(key);
     }
 
+    // 2. Check for active emergency for this citizenId
+    const activeEmergency = this.sosComplaints.find(
+      s => s.citizenId === citizenId && !['resolved', 'completed', 'cancelled'].includes(s.status)
+    );
+
+    if (activeEmergency) {
+      this.logger.log(`♻️ [DEDUP] Citizen ${citizenId} already has active SOS: ${activeEmergency.id}`);
+      return { ...activeEmergency, success: true, alreadyActive: true };
+    }
+
+    // 3. Cooldown check per fingerprint
     const existing = this.recentFingerprints.get(fingerprint);
-    if (existing && now - existing.createdAt < this.DEDUP_WINDOW_MS) {
-      this.logger.log(`♻️ [DEDUP] Same SOS within ${this.DEDUP_WINDOW_MS}ms: ${fingerprint}`);
-      this.gateway.emitNewEmergency(existing.sos);
-      return { ...existing.sos, success: true };
+    if (existing && now - existing.createdAt < 20000) {
+      this.logger.log(`♻️ [DEDUP] Fingerprint cooldown: ${fingerprint}`);
+      return { ...existing.sos, success: true, alreadyActive: true };
     }
 
     try {

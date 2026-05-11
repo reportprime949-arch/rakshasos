@@ -20,7 +20,7 @@ export default function CitizenHome() {
   const [mounted, setMounted] = useState(false);
   const { coords, error, loading: gpsLoading, permissionStatus, gpsState, openSettings } = useGeolocation();
   
-  const { id, status, officer, startCountdown, triggerSOS, setLocation, cancelEmergency, checkActiveEmergency } = useEmergencyStore();
+  const { id, status, officer, isTriggering, startCountdown, triggerSOS, setLocation, cancelEmergency, checkActiveEmergency } = useEmergencyStore();
   
   const router = useRouter();
   const [countdown, setCountdown] = useState(3);
@@ -60,18 +60,32 @@ export default function CitizenHome() {
       if (countdown > 0) {
         if (window.navigator.vibrate) window.navigator.vibrate(50);
         timer = setTimeout(() => setCountdown(prev => prev - 1), 1000);
-      } else {
+      } else if (!isTriggering && !id) {
+        // COUNTDOWN REACHED 0 — TRIGGER SOS
         const handleSOS = async () => {
-          if (!coords) return; // Final safety check
+          if (!coords) {
+            console.error('❌ [SOS] No GPS coordinates available at trigger time');
+            return;
+          }
+          
           try {
+             console.log('🚨 [SOS] Countdown finished. Triggering SOS...');
              const result = await triggerSOS('Test Citizen', 'CIT-12345');
+             
              if (result?.success) {
-                router.push("/alert-sent");
+                if (result.alreadyActive) {
+                   console.log('ℹ️ [SOS] Active incident found. Resuming...');
+                   // Just let the store update naturally
+                } else {
+                   router.push("/alert-sent");
+                }
              } else {
+                alert(`SOS Failed: ${result?.error || 'Unknown error'}`);
                 router.push("/network-error");
              }
-          } catch (err) {
-             console.error(err);
+          } catch (err: any) {
+             console.error('❌ [SOS] Trigger Error:', err);
+             alert(`SOS Error: ${err.message}`);
              router.push("/network-error");
           }
         };
@@ -81,7 +95,7 @@ export default function CitizenHome() {
       setCountdown(3);
     }
     return () => clearTimeout(timer);
-  }, [status, countdown, triggerSOS, router, coords]);
+  }, [status, countdown, triggerSOS, router, coords, isTriggering, id]);
 
   // Start polling when an active SOS exists
   useEffect(() => {
@@ -181,7 +195,7 @@ export default function CitizenHome() {
               ) : (
                 <button
                   onClick={startCountdown}
-                  disabled={!canTriggerSos}
+                  disabled={!canTriggerSos || status !== 'IDLE' || isTriggering}
                   className={`emergency-btn w-72 h-72 rounded-full flex flex-col items-center justify-center space-y-2 transition-all ${
                     canTriggerSos ? 'pulse scale-100 opacity-100' : 'opacity-40 grayscale scale-95 cursor-not-allowed'
                   }`}

@@ -32,6 +32,7 @@ interface EmergencyState {
     longitude: number;
     eta: string;
   } | null;
+  isTriggering: boolean;
   error: string | null;
 
   // Actions
@@ -59,6 +60,7 @@ export const useEmergencyStore = create<EmergencyState>()(
     location: null,
     lastGPSUpdate: 0,
     officer: null,
+    isTriggering: false,
     error: null,
 
     checkActiveEmergency: async () => {
@@ -96,7 +98,7 @@ export const useEmergencyStore = create<EmergencyState>()(
         localStorage.removeItem('rakshasos-emergency-session');
         sessionStorage.clear();
       } catch { /* SSR */ }
-      set({ id: null, status: 'IDLE', officer: null, location: null, startTime: null, error: null });
+      set({ id: null, status: 'IDLE', officer: null, location: null, startTime: null, error: null, isTriggering: false });
     },
 
     startCountdown: () => set({ status: 'COUNTDOWN' }),
@@ -104,6 +106,13 @@ export const useEmergencyStore = create<EmergencyState>()(
     assignOfficer: (officer) => set({ officer, status: 'ASSIGNED' }),
 
     triggerSOS: async (citizenName, citizenId) => {
+      if (get().isTriggering || get().id) {
+        console.warn('⚠️ [SOS] Trigger already in progress or SOS active. Ignoring duplicate call.');
+        return { success: true, id: get().id };
+      }
+
+      set({ isTriggering: true, error: null });
+
       console.log('══════════════════════════════════════════');
       console.log('🚨 [SOS] BUTTON CLICKED — Starting Emergency Pipeline');
       console.log('══════════════════════════════════════════');
@@ -206,6 +215,7 @@ export const useEmergencyStore = create<EmergencyState>()(
             startTime,
             location: { latitude, longitude },
             error: null,
+            isTriggering: false,
           });
           console.log('💾 [SOS] Step 4: Local state updated — status=SEARCHING, id=' + result.id);
 
@@ -224,7 +234,7 @@ export const useEmergencyStore = create<EmergencyState>()(
           return result;
         } else {
           console.error('❌ [SOS] Backend response missing success/id:', result);
-          set({ error: result?.error || 'Failed to create emergency.' });
+          set({ error: result?.error || 'Failed to create emergency.', isTriggering: false });
           return { success: false, error: result?.error || 'Invalid response' };
         }
       } catch (err: any) {
@@ -234,7 +244,7 @@ export const useEmergencyStore = create<EmergencyState>()(
         console.error('❌ [SOS] Error message:', err?.message);
         console.error('❌ [SOS] Stack:', err?.stack);
         console.error('══════════════════════════════════════════');
-        set({ error: 'Network request failed. Check your connection.' });
+        set({ error: 'Network request failed. Check your connection.', isTriggering: false });
         return { success: false, error: err?.message || 'Network failure' };
       }
     },
