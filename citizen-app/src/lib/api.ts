@@ -3,7 +3,7 @@
  * All backend requests must use this config to ensure consistent URLs.
  */
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://https://rakshasos-backend.onrender.com';
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com';
 export const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || API_URL;
 
 /**
@@ -43,7 +43,8 @@ export async function safeFetch(url: string, options?: RequestInit) {
   const fetchPromise = (async () => {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10000);
+      // 30s timeout — Render cold starts can take 15-30s
+      const timeout = setTimeout(() => controller.abort(), 30000);
 
       const response = await fetch(url, {
         ...options,
@@ -71,4 +72,3 @@ export async function safeFetch(url: string, options?: RequestInit) {
   requestCache.set(cacheKey, { promise: fetchPromise, timestamp: Date.now() });
   return fetchPromise;
 }
-

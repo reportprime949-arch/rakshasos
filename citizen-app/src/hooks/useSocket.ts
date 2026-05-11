@@ -11,13 +11,18 @@ let socketRefCount = 0;
 
 function getSharedSocket(): Socket {
   if (!sharedSocket) {
+    console.log('🔌 [CITIZEN SOCKET] Creating socket to:', SOCKET_URL);
     sharedSocket = io(SOCKET_URL, {
-      transports: ['websocket', 'polling'],
+      // CRITICAL: Start with polling, then upgrade to websocket.
+      // Render's proxy requires HTTP handshake first before WSS upgrade.
+      transports: ['polling', 'websocket'],
+      upgrade: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      timeout: 20000,
+      timeout: 30000,
+      forceNew: false,
     });
   }
   socketRefCount++;
@@ -65,7 +70,7 @@ export const useSocket = (token?: string) => {
     // Off before on to prevent listener stacking
     socket.off('connect');
     socket.on('connect', () => {
-      console.log('✅ [CITIZEN SOCKET] Connected:', socket.id);
+      console.log('✅ [CITIZEN SOCKET] Connected:', socket.id, '| Transport:', (socket as any).io?.engine?.transport?.name);
       setConnectionState('connected');
       
       const currentId = storeRef.current.id;
@@ -171,4 +176,3 @@ export const useSocket = (token?: string) => {
 
   return { socket: socketRef.current, connectionState };
 };
-

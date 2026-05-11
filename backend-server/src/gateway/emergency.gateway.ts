@@ -13,19 +13,28 @@ import { EmergencyService } from '../modules/emergency/emergency.service';
 import { RouteService } from '../modules/emergency/route.service';
 import { JwtService } from '@nestjs/jwt';
 
+// Production CORS origins — must match main.ts
+const ALLOWED_ORIGINS = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:3002',
+  'http://localhost:3003',
+  'https://rakshasos.vercel.app',
+  'https://rakshasos-3tro.vercel.app',
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
 @WebSocketGateway({
+  transports: ['websocket', 'polling'],
   cors: {
-    origin: [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://localhost:3002',
-      'http://localhost:3003',
-      'https://rakshasos.vercel.app',
-      'https://rakshasos-3tro.vercel.app',
-      process.env.FRONTEND_URL,
-    ].filter(Boolean),
+    origin: ALLOWED_ORIGINS,
+    methods: ['GET', 'POST'],
     credentials: true,
   },
+  // Allow upgrades on Render (required for WSS)
+  allowUpgrades: true,
+  pingTimeout: 60000,
+  pingInterval: 25000,
 })
 export class EmergencyGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
   @WebSocketServer()
@@ -58,6 +67,7 @@ export class EmergencyGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   async handleConnection(client: Socket) {
+    const transport = client.conn?.transport?.name || 'unknown';
     try {
       const token = client.handshake.auth.token || client.handshake.headers.authorization?.split(' ')[1];
 
@@ -67,7 +77,7 @@ export class EmergencyGateway implements OnGatewayConnection, OnGatewayDisconnec
         });
 
         client.data.user = payload;
-        this.logger.log(`✅ AUTHENTICATED: ${client.id} (Role: ${payload.role || 'user'})`);
+        this.logger.log(`✅ AUTHENTICATED: ${client.id} (Role: ${payload.role || 'user'}, Transport: ${transport})`);
 
         const userRole = (payload.role || '').toLowerCase();
 
@@ -80,12 +90,17 @@ export class EmergencyGateway implements OnGatewayConnection, OnGatewayDisconnec
         }
       } else {
         client.data.user = { role: 'citizen' };
-        this.logger.log(`👤 CITIZEN CONNECTED: ${client.id}`);
+        this.logger.log(`👤 CITIZEN CONNECTED: ${client.id} (Transport: ${transport})`);
       }
     } catch (err) {
-      this.logger.warn(`❌ AUTH FAILED (Defaulting to Citizen): ${err.message}`);
+      this.logger.warn(`❌ AUTH FAILED: ${err.message} (Transport: ${transport})`);
       client.data.user = { role: 'citizen' };
     }
+
+    // Log transport upgrade
+    client.conn?.on('upgrade', (transport: any) => {
+      this.logger.log(`⬆️ TRANSPORT UPGRADE: ${client.id} → ${transport.name}`);
+    });
 
     const allSockets = await this.server.fetchSockets();
     this.logger.log(`📊 [CONNECTIONS] Total: ${allSockets.length}, Officers: ${this.connectedOfficers.size}`);
@@ -140,7 +155,7 @@ export class EmergencyGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @SubscribeMessage('citizen:track')
   async handleCitizenTrack(@MessageBody() data: { incidentId: string }, @ConnectedSocket() client: Socket) {
-    this.logger.log(`👁️ CITIZEN TRACKING START: ${data.incidentId}`);
+    this.logger.log(`👁️ CITIZEN TRACKING: ${data.incidentId}`);
     client.join(`incident_${data.incidentId}`);
 
     const incident = await this.emergencyService.getSOSById(data.incidentId);
@@ -231,7 +246,7 @@ export class EmergencyGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   emitUpdate(incident: any) {
     const payload = { ...incident, msgId: `upd_${Date.now()}_${incident.id}` };
-    this.logger.log(`🔄 [BROADCAST] Status update for ${incident.id}: ${incident.status}`);
+    this.logger.log(`🔄 [BROADCAST] Status update: ${incident.id} → ${incident.status}`);
     this.server.to('dispatchers').to(`incident_${incident.id}`).emit('emergency:update', payload);
     this.server.emit('emergency:update', payload);
   }

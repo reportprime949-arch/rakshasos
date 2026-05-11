@@ -13,12 +13,14 @@ let socketRefCount = 0;
 function getSharedSocket(): Socket {
   if (!sharedSocket) {
     sharedSocket = io(API_URL, {
-      transports: ['websocket', 'polling'],
+      // CRITICAL: polling first, then upgrade to websocket on Render
+      transports: ['polling', 'websocket'],
+      upgrade: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      timeout: 20000,
+      timeout: 30000,
       auth: {
         token: typeof window !== 'undefined' ? localStorage.getItem('token') : null,
       },

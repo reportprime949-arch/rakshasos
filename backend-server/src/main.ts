@@ -10,17 +10,17 @@ import rateLimit from 'express-rate-limit';
 async function bootstrap() {
   const logger = new Logger('RakshaSOS-Main');
   const app = await NestFactory.create(AppModule);
-  
+
   // PERFORMANCE & SECURITY MIDDLEWARE
   app.use(helmet());
   app.use(require('compression')());
   app.use(rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 300, // limit each IP to 300 requests per 15 mins
+    windowMs: 15 * 60 * 1000,
+    max: 300,
     message: 'Security threshold reached. Please try again later.',
   }));
 
-  // STEP 3 — PRODUCTION CORS
+  // PRODUCTION CORS — must match gateway CORS
   const allowedOrigins = [
     'http://localhost:3000',
     'http://localhost:3001',
@@ -47,18 +47,27 @@ async function bootstrap() {
     credentials: true,
   });
 
-
   app.useGlobalPipes(new ValidationPipe({
     whitelist: true,
     transform: true,
   }));
 
-  // Trust proxy for Render deployment (correctly handle rate limiting)
+  // Trust proxy for Render deployment
   (app.getHttpAdapter().getInstance() as any).set('trust proxy', 1);
 
+  // ROOT HEALTH ENDPOINT — required for Render health checks
+  const httpAdapter = app.getHttpAdapter();
+  httpAdapter.get('/health', (req: any, res: any) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+  httpAdapter.get('/', (req: any, res: any) => {
+    res.status(200).json({ status: 'ok', service: 'RakshaSOS Backend', timestamp: new Date().toISOString() });
+  });
+
+  // Render requires binding to 0.0.0.0
   const port = process.env.PORT || 5000;
-  await app.listen(port);
-  logger.log(`🚀 RakshaSOS Backend secured and running on: http://localhost:${port}`);
+  await app.listen(port, '0.0.0.0');
+  logger.log(`🚀 RakshaSOS Backend running on port ${port} (0.0.0.0)`);
+  logger.log(`📡 Allowed origins: ${allowedOrigins.join(', ')}`);
 }
 bootstrap();
-

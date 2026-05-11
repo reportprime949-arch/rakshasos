@@ -171,7 +171,8 @@ export const useEmergencyStore = create<EmergencyState>()(
         console.log('🌐 [SOS] Step 3: Sending POST to', `${API_URL}/api/emergency`);
 
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 15000);
+        // 45s timeout — Render free tier cold starts can take 30s+
+        const timeout = setTimeout(() => controller.abort(), 45000);
 
         const response = await fetch(`${API_URL}/api/emergency`, {
           method: 'POST',
