@@ -1,4 +1,23 @@
 {
+  "name": "rakshasos-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "citizen-app",
+    "officer-app",
+    "admin-dashboard",
+    "backend-server"
+  ],
+  "scripts": {
+    "dev": "npx -y concurrently \"npm run dev -w citizen-app\" \"npm run dev -w officer-app\" \"npm run dev -w admin-dashboard\" \"npm run dev -w backend-server\"",
+    "build": "npm run build --workspaces",
+    "install-all": "npm install && npm install --workspaces",
+    "clean": "rimraf node_modules **/node_modules"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "rimraf": "^5.0.5"
+  },
   "dependencies": {
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.14.0",

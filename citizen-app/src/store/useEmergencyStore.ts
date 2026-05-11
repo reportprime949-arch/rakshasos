@@ -2,7 +2,10 @@ import { create } from 'zustand';
 import { db } from '@/lib/firebase';
 import { doc, setDoc, serverTimestamp, collection, getDocs, query, where, onSnapshot } from 'firebase/firestore';
 import { calculateDistance } from '@/utils/distance';
-import { API_URL, safeFetch } from '@/lib/api';
+import { distanceMeters } from '@/utils/animateMarker';
+import { gpsManager } from '@/utils/GeolocationManager';
+import { API_URL } from '@/lib/api';
+
 
 export type EmergencyStatus = 
   | 'IDLE'
@@ -34,6 +37,7 @@ interface EmergencyState {
   // Actions
   startCountdown: () => void;
   triggerSOS: (citizenName: string, citizenId: string) => Promise<any>;
+  checkActiveEmergency: () => Promise<void>;
   setLocation: (location: { latitude: number; longitude: number }) => void;
   updateStatus: (status: EmergencyStatus) => void;
   assignOfficer: (officer: any) => void;
@@ -42,8 +46,10 @@ interface EmergencyState {
   reset: () => void;
 }
 
-// Terminal states — polling must stop when we reach these
 const TERMINAL_STATUSES: EmergencyStatus[] = ['IDLE', 'COMPLETED', 'CANCELLED'];
+let lastPushedLat = 0;
+let lastPushedLng = 0;
+let activeSyncId: string | null = null;
 
 export const useEmergencyStore = create<EmergencyState>()(
   (set, get) => ({
@@ -55,22 +61,42 @@ export const useEmergencyStore = create<EmergencyState>()(
     officer: null,
     error: null,
 
-    reset: () => {
-      console.log('🧹 [CITIZEN RESET] Clearing all emergency state');
+    checkActiveEmergency: async () => {
+      if (typeof window === 'undefined') return;
+      const savedId = localStorage.getItem('rakshasos_active_id');
+      if (!savedId || get().id) return;
+      console.log('🔄 [RECOVERY] Verifying incident with backend:', savedId);
+      
       try {
+        const res = await fetch(`${API_URL}/api/emergency/${savedId}`, { cache: 'no-store' });
+        if (!res.ok) throw new Error('Not found');
+        const data = await res.json();
+        
+        if (!data || data.status === 'resolved' || data.status === 'cancelled' || data.status === 'completed') {
+          console.log('🧹 [RECOVERY] Incident resolved/gone — resetting to IDLE');
+          get().reset();
+          return;
+        }
+        
+        console.log('✅ [RECOVERY] Active incident found:', savedId, 'status:', data.status);
+        set({ id: savedId, status: 'SEARCHING' });
+      } catch {
+        console.log('🧹 [RECOVERY] Backend unreachable or incident gone — resetting');
+        get().reset();
+      }
+    },
+
+    reset: () => {
+      console.log('🧹 [CITIZEN RESET] Clearing state');
+      lastPushedLat = 0;
+      lastPushedLng = 0;
+      activeSyncId = null;
+      try {
+        localStorage.removeItem('rakshasos_active_id');
         localStorage.removeItem('rakshasos-emergency-session');
-        localStorage.removeItem('activeSOS');
-        localStorage.removeItem('activeEmergency');
         sessionStorage.clear();
-      } catch { /* SSR guard */ }
-      set({ 
-        id: null, 
-        status: 'IDLE', 
-        officer: null, 
-        location: null, 
-        startTime: null,
-        error: null 
-      });
+      } catch { /* SSR */ }
+      set({ id: null, status: 'IDLE', officer: null, location: null, startTime: null, error: null });
     },
 
     startCountdown: () => set({ status: 'COUNTDOWN' }),
@@ -78,72 +104,146 @@ export const useEmergencyStore = create<EmergencyState>()(
     assignOfficer: (officer) => set({ officer, status: 'ASSIGNED' }),
 
     triggerSOS: async (citizenName, citizenId) => {
+      console.log('══════════════════════════════════════════');
+      console.log('🚨 [SOS] BUTTON CLICKED — Starting Emergency Pipeline');
+      console.log('══════════════════════════════════════════');
+      console.log('🚨 [SOS] citizenName:', citizenName);
+      console.log('🚨 [SOS] citizenId:', citizenId);
+      console.log('🚨 [SOS] timestamp:', new Date().toISOString());
+      
       const startTime = Date.now();
       let latitude = 0;
       let longitude = 0;
 
-      // Request fresh GPS coordinates
+      // ── STEP 1: Acquire GPS coordinates ──
       try {
-        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-          if (!navigator.geolocation) {
-            reject(new Error('Geolocation not supported'));
-            return;
-          }
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 10000,
-            maximumAge: 0
-          });
-        });
-        latitude = position.coords.latitude;
-        longitude = position.coords.longitude;
-        console.log("LAT:", latitude);
-        console.log("LNG:", longitude);
+        console.log('📍 [SOS] Step 1: Fetching high-accuracy GPS fix...');
+        const lastKnown = gpsManager.getLastKnownLocation();
+        if (lastKnown && Date.now() - lastKnown.coords.timestamp < 10000) {
+          // Use high-quality recent cache
+          latitude = lastKnown.coords.latitude;
+          longitude = lastKnown.coords.longitude;
+          console.log('📍 [SOS] GPS from cache:', latitude, longitude);
+        } else {
+          // Fallback to quick check
+          console.log('📍 [SOS] No recent cache, requesting fresh GPS...');
+          const freshCoords = await Promise.race([
+            new Promise<GeolocationPosition>((resolve, reject) => {
+              if (typeof window === 'undefined' || !navigator.geolocation) return reject(new Error('No GPS'));
+              navigator.geolocation.getCurrentPosition(resolve, reject, {
+                enableHighAccuracy: true, timeout: 3000, maximumAge: 0 
+              });
+            }),
+            new Promise<null>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 3500))
+          ]) as GeolocationPosition;
+          latitude = freshCoords.coords.latitude;
+          longitude = freshCoords.coords.longitude;
+          console.log('📍 [SOS] GPS from fresh fix:', latitude, longitude);
+        }
       } catch (err) {
-        console.error("⚠️ [GPS FAILED] Using fallback/store coords:", err);
+        console.warn('⚠️ [SOS] GPS acquisition failed, using store location:', err);
         const storeLocation = get().location;
         latitude = storeLocation?.latitude || 0;
         longitude = storeLocation?.longitude || 0;
       }
 
+      if (latitude === 0 || longitude === 0) {
+        console.error('❌ [SOS] FAILED: GPS signal unavailable — cannot trigger SOS');
+        set({ error: 'Location required to trigger SOS.' });
+        return { success: false, error: 'GPS unavailable' };
+      }
+
+      // ── STEP 2: Build payload ──
       const payload = {
         citizenId,
         citizenName,
         emergencyType: 'SOS Triggered',
         latitude,
         longitude,
-        location: { lat: latitude, lng: longitude }, // Backward compatibility
+        location: { lat: latitude, lng: longitude },
         timestamp: Date.now(),
+        status: 'pending',
       };
-      
-      console.log('🚨 [SOS] Triggering emergency to:', `${API_URL}/api/emergency`);
-      console.log('📡 [API REQUEST]: POST /api/emergency', payload);
+      console.log('📦 [SOS] Step 2: Payload built:', JSON.stringify(payload));
 
-      const result = await safeFetch(`${API_URL}/api/emergency`, {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
+      // ── STEP 3: POST to backend ──
+      try {
+        console.log('🌐 [SOS] Step 3: Sending POST to', `${API_URL}/api/emergency`);
+        
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
 
-      if (result?.success === false) {
-        console.error('🔴 [SOS] Creation failed:', result.error);
-        set({ error: result.error || 'Failed to connect to command center.' });
-        return result;
+        const response = await fetch(`${API_URL}/api/emergency`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeout);
+
+        console.log('📡 [SOS] Response status:', response.status, response.statusText);
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => 'Unknown error');
+          console.error('❌ [SOS] Backend rejected request:', response.status, errorText);
+          set({ error: `Server error: ${response.status}` });
+          return { success: false, error: `HTTP ${response.status}` };
+        }
+
+        const result = await response.json();
+        console.log('✅ [SOS] Step 3 COMPLETE — Backend response:', JSON.stringify(result));
+
+        if (result?.success && result?.id) {
+          console.log('🎯 [SOS] Emergency created! ID:', result.id);
+          
+          // ── STEP 4: Update local state ──
+          try { localStorage.setItem('rakshasos_active_id', result.id); } catch { /* SSR */ }
+          set({
+            id: result.id,
+            status: 'SEARCHING',
+            startTime,
+            location: { latitude, longitude },
+            error: null,
+          });
+          console.log('💾 [SOS] Step 4: Local state updated — status=SEARCHING, id=' + result.id);
+
+          // ── STEP 5: Socket emit for immediate broadcast (redundant safety) ──
+          try {
+            console.log('📡 [SOS] Step 5: Socket emit not needed — backend broadcasts automatically');
+          } catch (socketErr) {
+            console.warn('⚠️ [SOS] Socket emit failed (non-critical):', socketErr);
+          }
+
+          console.log('══════════════════════════════════════════');
+          console.log('✅ [SOS] PIPELINE COMPLETE — Emergency', result.id, 'active');
+          console.log('⏱️ [SOS] Total time:', Date.now() - startTime, 'ms');
+          console.log('══════════════════════════════════════════');
+          
+          return result;
+        } else {
+          console.error('❌ [SOS] Backend response missing success/id:', result);
+          set({ error: result?.error || 'Failed to create emergency.' });
+          return { success: false, error: result?.error || 'Invalid response' };
+        }
+      } catch (err: any) {
+        console.error('══════════════════════════════════════════');
+        console.error('❌ [SOS] CRITICAL ERROR in SOS pipeline');
+        console.error('❌ [SOS] Error name:', err?.name);
+        console.error('❌ [SOS] Error message:', err?.message);
+        console.error('❌ [SOS] Stack:', err?.stack);
+        console.error('══════════════════════════════════════════');
+        set({ error: 'Network request failed. Check your connection.' });
+        return { success: false, error: err?.message || 'Network failure' };
       }
-
-      const data = result;
-      console.log('📥 [API RESPONSE]:', data);
-      set({
-        id: data.id,
-        status: 'SEARCHING',
-        startTime,
-        location: { latitude, longitude },
-        officer: null,
-        error: null,
-      });
-      return data;
     },
 
     setLocation: (location) => {
+      const current = get().location;
+      if (current) {
+        const moved = distanceMeters(current.latitude, current.longitude, location.latitude, location.longitude);
+        if (moved < 5) return;
+      }
       set({ location });
     },
 
@@ -152,39 +252,24 @@ export const useEmergencyStore = create<EmergencyState>()(
     cancelEmergency: async () => {
       const id = get().id;
       if (id) {
-        try {
-          await setDoc(doc(db, 'emergencies', id), {
-            status: 'CANCELLED',
-            updatedAt: serverTimestamp(),
-          }, { merge: true });
-        } catch { /* ignore */ }
+        try { await setDoc(doc(db, 'emergencies', id), { status: 'CANCELLED', updatedAt: serverTimestamp() }, { merge: true }); } catch { /* ignore */ }
       }
-      console.log('🚫 [CITIZEN MODAL CLOSED] Emergency cancelled');
       get().reset();
     },
 
     syncWithFirestore: () => {
       const id = get().id;
-      if (!id) return () => {};
-
-      console.log('📡 [CITIZEN SYNC] Starting Realtime Sync for:', id);
-
+      if (!id || activeSyncId === id) return () => {};
+      activeSyncId = id;
+      console.log('🛰️ [STORE] Starting Firestore Sync for:', id);
       const unsub = onSnapshot(doc(db, 'emergencies', id), (docSnap) => {
-        if (!docSnap.exists()) {
-          console.log('🧹 [CITIZEN RESET] Emergency not found — resetting');
-          get().reset();
-          return;
-        }
-
+        if (!docSnap.exists()) { get().reset(); return; }
         const data = docSnap.data();
         const status = data.status?.toLowerCase();
-
         if (status === 'resolved' || status === 'cancelled' || status === 'completed') {
-          console.log('🛑 [CITIZEN SYNC] Terminal state reached:', status);
           set({ status: (status === 'cancelled') ? 'CANCELLED' : 'COMPLETED', location: null });
           return;
         }
-
         if (status === 'arrived' || status === 'assigned' || status === 'enroute') {
           set({
             status: status === 'enroute' ? 'EN_ROUTE' : status.toUpperCase() as EmergencyStatus,
@@ -200,73 +285,23 @@ export const useEmergencyStore = create<EmergencyState>()(
           });
         }
       });
-
-      // PHASE 1: PUSH LIVE GPS UPDATES
       const gpsInterval = setInterval(async () => {
         const { location, status } = get();
         if (location && !TERMINAL_STATUSES.includes(status)) {
+          const moved = distanceMeters(lastPushedLat, lastPushedLng, location.latitude, location.longitude);
+          if (moved < 10 && lastPushedLat !== 0) return;
+          lastPushedLat = location.latitude;
+          lastPushedLng = location.longitude;
           try {
-            await setDoc(doc(db, 'emergencies', id), {
-              latitude: location.latitude,
-              longitude: location.longitude,
-              updatedAt: serverTimestamp()
-            }, { merge: true });
-          } catch (err) {
-            console.error('🛰️ [GPS PUSH ERROR]', err);
-          }
+            await setDoc(doc(db, 'emergencies', id), { latitude: location.latitude, longitude: location.longitude, updatedAt: serverTimestamp() }, { merge: true });
+          } catch (err) { console.error('🛰️ [GPS PUSH ERROR]', err); }
         }
       }, 5000);
-
-      return () => {
-        unsub();
-        clearInterval(gpsInterval);
+      return () => { 
+        unsub(); 
+        clearInterval(gpsInterval); 
+        if (activeSyncId === id) activeSyncId = null;
       };
     }
   })
 );
-
-// Helper function for assignment logic
-async function findAndAssignOfficer(emergencyId: string, location: { lat: number; lng: number }) {
-  try {
-    const officersRef = collection(db, 'officers');
-    const q = query(officersRef, where('active', '==', true));
-    const querySnapshot = await getDocs(q);
-    
-    let closestOfficer: any = null;
-    let minDistance = Infinity;
-
-    querySnapshot.forEach((docSnap) => {
-      const officer = docSnap.data();
-      const dist = calculateDistance(
-        location.lat,
-        location.lng,
-        officer.lat,
-        officer.lng
-      );
-      
-      if (dist < minDistance && dist <= 3) {
-        minDistance = dist;
-        closestOfficer = { id: docSnap.id, ...officer };
-      }
-    });
-
-    if (closestOfficer) {
-      console.log('🎯 AUTO-ASSIGNED OFFICER:', closestOfficer.id);
-      await setDoc(doc(db, 'emergencies', emergencyId), {
-        status: 'ASSIGNED',
-        assignedOfficerId: closestOfficer.id,
-        officerName: closestOfficer.name,
-        officerBadge: closestOfficer.badge || 'OFF-9921',
-        officerLat: closestOfficer.lat,
-        officerLng: closestOfficer.lng,
-        distanceKm: minDistance,
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-      return true;
-    }
-    return false;
-  } catch (error) {
-    console.error('🔴 AUTO-ASSIGNMENT FAILED:', error);
-    return false;
-  }
-}

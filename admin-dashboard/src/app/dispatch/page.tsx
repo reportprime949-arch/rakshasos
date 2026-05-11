@@ -23,10 +23,11 @@ export default function DispatchPanel() {
   useEffect(() => {
     // Real-time interval for fetching data
     const fetchData = async () => {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
       try {
         const [incRes, offRes] = await Promise.all([
-          fetch('https://rakshasos-backend.onrender.com/api/emergency'),
-          fetch('https://rakshasos-backend.onrender.com/api/officer') // Assuming this endpoint exists
+          fetch(`${API_URL}/api/emergency`),
+          fetch(`${API_URL}/api/officer`) // Assuming this endpoint exists
         ]);
         
         if (incRes.ok) {

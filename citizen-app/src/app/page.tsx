@@ -17,41 +17,41 @@ const CitizenLiveMap = dynamic(() => import('@/components/emergency/CitizenLiveM
 });
 
 export default function CitizenHome() {
-  const { coords, error, loading, permissionStatus, requestPermission, openSettings } = useGeolocation();
-  const { 
-    id, 
-    status, 
-    officer, 
-    startCountdown,
-    triggerSOS, 
-    setLocation,
-    cancelEmergency 
-  } = useEmergencyStore();
-  const router = useRouter();
-
-  const [countdown, setCountdown] = useState(3);
+  const [mounted, setMounted] = useState(false);
+  const { coords, error, loading: gpsLoading, permissionStatus, gpsState, openSettings } = useGeolocation();
   
+  const { id, status, officer, startCountdown, triggerSOS, setLocation, cancelEmergency, checkActiveEmergency } = useEmergencyStore();
+  
+  const router = useRouter();
+  const [countdown, setCountdown] = useState(3);
+
   // Connect to realtime server
   const socket = useSocket('citizen-test-token');
 
   // === PHASE 1: MANDATORY GPS ACCESS ===
-  const isGpsDenied = permissionStatus === 'denied' || error === 'PERMISSION_DENIED';
-  const isGpsLoading = loading && !coords;
+  const isGpsDenied = (permissionStatus === 'denied' || error === 'PERMISSION_DENIED') && gpsState !== 'locked';
+  const isGpsLoading = gpsLoading && !coords && gpsState === 'searching';
   const canTriggerSos = coords !== null && !isGpsDenied;
 
-  // === CRITICAL: Purge stale emergency state on mount ===
-  useEffect(() => {
-    try {
-      localStorage.removeItem('rakshasos-emergency-session');
-      localStorage.removeItem('activeSOS');
-      localStorage.removeItem('activeEmergency');
-    } catch { /* SSR guard */ }
 
-    const currentStatus = useEmergencyStore.getState().status;
-    if (currentStatus !== 'IDLE') {
-      useEmergencyStore.getState().reset();
-    }
-  }, []);
+  useEffect(() => {
+    const init = async () => {
+      const savedId = localStorage.getItem('rakshasos_active_id');
+      const activeStatuses = ['COUNTDOWN', 'SEARCHING', 'ASSIGNED', 'EN_ROUTE', 'ARRIVED'];
+      
+      if (savedId && status === 'IDLE') {
+        console.log('🔄 [RECOVERY] Attempting to resume incident:', savedId);
+        await checkActiveEmergency();
+      } else if (!savedId && !activeStatuses.includes(status) && status !== 'IDLE') {
+        // Only reset if we have no saved ID AND we are in a terminal/unexpected state
+        console.log('🧹 [CLEANUP] No active session found — resetting to IDLE');
+        useEmergencyStore.getState().reset();
+      }
+      
+      setMounted(true);
+    };
+    init();
+  }, [checkActiveEmergency, status]);
 
   // Countdown timer for SOS activation
   useEffect(() => {
@@ -96,10 +96,27 @@ export default function CitizenHome() {
     if (coords) setLocation({ latitude: coords.latitude, longitude: coords.longitude });
   }, [coords, setLocation]);
 
+  if (!mounted) return null;
+
   return (
     <main className={`min-h-screen transition-colors duration-1000 flex flex-col overflow-hidden ${
       status === 'COMPLETED' ? 'bg-[#001219]' : 'bg-black'
     }`}>
+      {/* Dev Tool: Simulate GPS (Always visible in dev) */}
+      {process.env.NODE_ENV === 'development' && (
+        <button 
+          id="simulate-gps"
+          onClick={() => {
+            const { gpsManager } = require('@/utils/GeolocationManager');
+            gpsManager.simulateLocation(17.3850, 78.4867);
+            setLocation({ latitude: 17.3850, longitude: 78.4867 });
+          }}
+          className="fixed top-4 right-4 z-[9999] px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-[8px] font-black uppercase tracking-widest text-gray-500 hover:bg-white/10 transition-all backdrop-blur-md"
+        >
+          Simulate Tactical GPS
+        </button>
+      )}
+
       {/* PHASE 1: FULLSCREEN PERMISSION WARNING */}
       <AnimatePresence>
         {isGpsDenied && (
@@ -185,7 +202,14 @@ export default function CitizenHome() {
                 </span>
               </div>
               
+              {process.env.NODE_ENV === 'development' && !canTriggerSos && (
+                <div className="h-4" />
+              )}
+
+
+
               {!canTriggerSos && !isGpsDenied && (
+
                 <motion.p 
                   animate={{ opacity: [0.3, 1, 0.3] }}
                   transition={{ repeat: Infinity, duration: 2 }}
@@ -288,7 +312,7 @@ export default function CitizenHome() {
               transition={{ delay: 0.4 }}
               className="w-full max-w-lg z-10 space-y-6"
             >
-              <div className="glass p-8 rounded-[3.5rem] border border-white/5 bg-white/5 relative overflow-hidden group">
+              <div className="glass p-6 sm:p-8 rounded-[3.5rem] border border-white/5 bg-white/5 relative overflow-hidden group">
                 <div className="absolute top-0 right-0 p-6">
                    <Zap size={20} className="text-green-500/50" />
                 </div>

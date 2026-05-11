@@ -54,6 +54,8 @@ export default function AdminDashboard() {
     return () => clearTimeout(timer);
   }, [emergencies]);
 
+  const [showMapMobile, setShowMapMobile] = useState(false);
+
   return (
     <div className={`flex h-screen bg-black text-white overflow-hidden font-sans transition-all duration-700 ${isEmergencyVisualActive ? 'shadow-[inset_0_0_150px_rgba(220,38,38,0.4)] ring-4 ring-red-600 ring-inset' : ''}`}>
 
@@ -68,32 +70,45 @@ export default function AdminDashboard() {
           />
         )}
       </AnimatePresence>
+
+      {/* MOBILE TOGGLE FAB */}
+      <div className="lg:hidden fixed bottom-10 right-10 z-[300]">
+        <button
+          onClick={() => setShowMapMobile(!showMapMobile)}
+          className="w-16 h-16 rounded-full bg-red-600 text-white shadow-2xl flex items-center justify-center border-4 border-white/10 active:scale-90 transition-transform"
+        >
+          {showMapMobile ? <Activity size={24} /> : <MapPin size={24} />}
+        </button>
+      </div>
+
       {/* Sidebar - Incident Feed */}
-      <aside className="w-[400px] border-r border-white/5 bg-[#050505] flex flex-col z-20">
-        <div className="p-8 border-b border-white/5 bg-gradient-to-b from-white/5 to-transparent">
+      <aside className={`w-full lg:w-[400px] border-r border-white/5 bg-[#050505] flex flex-col z-20 transition-transform duration-500 ${
+        showMapMobile ? '-translate-x-full lg:translate-x-0' : 'translate-x-0'
+      }`}>
+        <div className="p-6 lg:p-8 border-b border-white/5 bg-gradient-to-b from-white/5 to-transparent">
           <div className="flex items-center justify-between mb-2">
-            <h1 className="text-2xl font-black tracking-tighter uppercase italic">Raksha Control</h1>
+            <h1 className="text-xl lg:text-2xl font-black tracking-tighter uppercase italic">Raksha Control</h1>
             {emergencies.length > 0 && (
               <motion.span 
                 animate={{ scale: [1, 1.1, 1], opacity: [0.7, 1, 0.7] }}
                 transition={{ repeat: Infinity, duration: 1 }}
                 className="text-[8px] font-black px-2 py-1 rounded bg-red-600 text-white uppercase tracking-widest"
               >
-                NEW EMERGENCY ALERT
+                SOS
               </motion.span>
             )}
           </div>
           <div className="flex items-center space-x-2">
             <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-            <p className="text-gray-500 text-[10px] uppercase tracking-[0.3em] font-black">Live Monitoring Active</p>
+            <p className="text-gray-500 text-[9px] lg:text-[10px] uppercase tracking-[0.3em] font-black">Live Monitoring</p>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-10 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-4 lg:p-6 space-y-10 custom-scrollbar">
           {/* ACTIVE INCIDENTS */}
           <div className="space-y-6">
             <div className="flex items-center justify-between px-2">
-              <h2 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">Active Incidents</h2>
+              <h2 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">Active</h2>
               <span className="bg-red-500/10 text-red-500 text-[10px] px-3 py-1 rounded-full font-black border border-red-500/20">
                 {activeIncidents.length} LIVE
               </span>
@@ -103,20 +118,7 @@ export default function AdminDashboard() {
               {isInitialLoad ? (
                 <div className="space-y-4">
                   {[1, 2].map((i) => (
-                    <div key={i} className="p-6 rounded-[2rem] border border-white/5 bg-white/5 animate-pulse">
-                      <div className="flex justify-between items-start mb-4">
-                        <div className="space-y-2">
-                          <div className="h-3 bg-white/5 rounded w-20" />
-                          <div className="h-5 bg-white/5 rounded w-32" />
-                        </div>
-                        <div className="h-5 bg-white/5 rounded-full w-16" />
-                      </div>
-                      <div className="space-y-3 mb-6">
-                        <div className="h-3 bg-white/5 rounded w-40" />
-                        <div className="h-3 bg-white/5 rounded w-48" />
-                      </div>
-                      <div className="h-3 bg-white/5 rounded w-24" />
-                    </div>
+                    <div key={i} className="p-6 rounded-[2rem] border border-white/5 bg-white/5 animate-pulse" />
                   ))}
                 </div>
               ) : activeIncidents.length === 0 ? (
@@ -126,7 +128,7 @@ export default function AdminDashboard() {
                   className="p-8 text-center border border-dashed border-white/5 rounded-3xl"
                 >
                   <Activity size={24} className="mx-auto text-gray-800 mb-3" />
-                  <p className="text-[8px] text-gray-600 font-bold uppercase tracking-widest">Awaiting Emergencies</p>
+                  <p className="text-[8px] text-gray-600 font-bold uppercase tracking-widest">Awaiting</p>
                 </motion.div>
               ) : (
                 activeIncidents.map((alert: any) => (
@@ -136,26 +138,24 @@ export default function AdminDashboard() {
             </AnimatePresence>
           </div>
 
-          {/* RESOLVED INCIDENTS (HISTORY) */}
-          <div className="space-y-6 opacity-60 hover:opacity-100 transition-opacity">
-            <div className="flex items-center justify-between px-2">
-              <h2 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">Incident History</h2>
-              <span className="bg-green-500/10 text-green-500 text-[10px] px-3 py-1 rounded-full font-black border border-green-500/20">
-                {resolvedIncidents.length} ARCHIVED
-              </span>
-            </div>
-
-            <div className="space-y-4">
-              {resolvedIncidents.map((alert: any) => (
-                <IncidentRow key={alert.id} alert={alert} isActive={false} />
-              ))}
-            </div>
+          {/* HISTORY */}
+          <div className="space-y-6 opacity-60">
+             <div className="px-2">
+               <h2 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">History</h2>
+             </div>
+             <div className="space-y-4">
+               {resolvedIncidents.map((alert: any) => (
+                 <IncidentRow key={alert.id} alert={alert} isActive={false} />
+               ))}
+             </div>
           </div>
         </div>
       </aside>
 
       {/* Main Content - Geospatial View */}
-      <main className="flex-1 relative bg-black overflow-hidden">
+      <main className={`flex-1 relative bg-black overflow-hidden transition-transform duration-500 ${
+        showMapMobile ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'
+      }`}>
         {/* Actual Live Map Component */}
         <AdminLiveMap 
           incidents={emergencies} 
@@ -163,28 +163,16 @@ export default function AdminDashboard() {
         />
         
         {/* Top Analytics */}
-        <div className="absolute top-10 left-10 right-10 flex justify-between items-start pointer-events-none z-10">
-          <div className="glass px-8 py-4 rounded-[2rem] border border-white/5 flex items-center space-x-12 pointer-events-auto shadow-2xl">
+        <div className="absolute top-6 lg:top-10 left-6 lg:left-10 right-6 lg:right-10 flex justify-between items-start pointer-events-none z-10">
+          <div className="glass px-4 lg:px-8 py-2 lg:py-4 rounded-2xl lg:rounded-[2rem] border border-white/5 flex items-center space-x-6 lg:space-x-12 pointer-events-auto shadow-2xl">
             <div className="text-center">
-              <p className="text-[10px] text-gray-500 font-black uppercase tracking-[0.2em]">Active Officers</p>
-              <p className="text-3xl font-black italic tracking-tighter">{activeOfficers.length || '---'}</p>
+              <p className="text-[8px] lg:text-[10px] text-gray-500 font-black uppercase tracking-[0.2em]">Officers</p>
+              <p className="text-xl lg:text-3xl font-black italic tracking-tighter">{activeOfficers.length || '---'}</p>
             </div>
-            <div className="h-10 w-px bg-white/10" />
+            <div className="h-6 lg:h-10 w-px bg-white/10" />
             <div className="text-center">
-              <p className="text-[10px] text-gray-500 font-black uppercase tracking-[0.2em]">Response Time</p>
-              <p className="text-3xl font-black italic tracking-tighter text-green-500">3.8m</p>
-            </div>
-          </div>
-
-          <div className="glass px-8 py-4 rounded-[2rem] border border-white/5 pointer-events-auto shadow-2xl">
-            <div className="flex items-center space-x-4">
-              <div className="w-10 h-10 rounded-2xl bg-white/5 flex items-center justify-center border border-white/5">
-                <Activity size={20} className="text-blue-500" />
-              </div>
-              <div>
-                <p className="text-[10px] text-gray-500 font-black uppercase tracking-widest">Network Throughput</p>
-                <p className="text-sm font-black italic">1,244 Events/sec</p>
-              </div>
+              <p className="text-[8px] lg:text-[10px] text-gray-500 font-black uppercase tracking-[0.2em]">Response</p>
+              <p className="text-xl lg:text-3xl font-black italic tracking-tighter text-green-500">3.8m</p>
             </div>
           </div>
         </div>
@@ -212,6 +200,7 @@ export default function AdminDashboard() {
 }
 
 // Sub-component for incident rows — memoized to prevent re-renders
+
 const IncidentRow = React.memo(function IncidentRow({ alert, isActive }: { alert: any, isActive: boolean }) {
   const isResolved = alert.status === 'RESOLVED' || alert.status === 'COMPLETED';
   

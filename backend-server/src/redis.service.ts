@@ -6,11 +6,32 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   private client: Redis;
 
   async onModuleInit() {
-    this.client = new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: Number(process.env.REDIS_PORT) || 6379,
-    });
+    try {
+      this.client = new Redis({
+        host: process.env.REDIS_HOST || 'localhost',
+        port: Number(process.env.REDIS_PORT) || 6379,
+        maxRetriesPerRequest: 1,
+        retryStrategy: (times) => {
+          if (times > 3) {
+            console.warn('⚠️ [REDIS] Max retries reached. Operating without Redis cache.');
+            return null; // Stop retrying
+          }
+          return Math.min(times * 100, 3000);
+        }
+      });
+
+      this.client.on('error', (err: any) => {
+        // Silent fail to prevent process crash
+        if (err.code === 'ECONNREFUSED') {
+
+           // console.warn('⚠️ [REDIS] Connection Refused - check if redis is running');
+        }
+      });
+    } catch (e) {
+      console.warn('⚠️ [REDIS] Initialization failed:', e.message);
+    }
   }
+
 
   async onModuleDestroy() {
     await this.client.quit();

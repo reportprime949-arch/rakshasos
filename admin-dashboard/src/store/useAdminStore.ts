@@ -29,12 +29,13 @@ export const useAdminStore = create<AdminState>((set) => ({
   emergencies: [],
   activeOfficers: [],
 
-  addEmergency: (session) => set((state) => ({ 
-    emergencies: [session, ...state.emergencies] 
-  })),
+  addEmergency: (session) => set((state) => {
+    if (state.emergencies.find(e => e.id === session.id)) return state;
+    return { emergencies: [session, ...state.emergencies] };
+  }),
 
   updateEmergency: (session) => set((state) => ({
-    emergencies: state.emergencies.map(e => e.id === session.id ? session : e)
+    emergencies: state.emergencies.map(e => e.id === session.id ? { ...e, ...session } : e)
   })),
 
   setEmergencies: (emergencies) => set({ emergencies }),
@@ -42,6 +43,6 @@ export const useAdminStore = create<AdminState>((set) => ({
   setOfficers: (activeOfficers) => set({ activeOfficers }),
 
   updateOfficerLocation: (officerId, lat, lng) => set((state) => ({
-    activeOfficers: state.activeOfficers.map(o => o.id === officerId ? { ...o, lat, lng } : o)
+    activeOfficers: state.activeOfficers.map(o => o.id === officerId ? { ...o, lat, lng, latitude: lat, longitude: lng } : o)
   })),
 }));

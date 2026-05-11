@@ -11,12 +11,36 @@ async function bootstrap() {
   const logger = new Logger('RakshaSOS-Main');
   const app = await NestFactory.create(AppModule);
   
-  // STEP 3 — ENABLE GLOBAL CORS
+  // PERFORMANCE & SECURITY MIDDLEWARE
+  app.use(helmet());
+  app.use(require('compression')());
+  app.use(rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 300, // limit each IP to 300 requests per 15 mins
+    message: 'Security threshold reached. Please try again later.',
+  }));
+
+  // STEP 3 — ENABLE STRICT CORS
+  const allowedOrigins = [
+    'http://localhost:3000', // Citizen Legacy
+    'http://localhost:3003', // Citizen Current
+    'http://localhost:3001', // Officer
+    'http://localhost:3002', // Admin
+    process.env.FRONTEND_URL, // Production
+  ].filter(Boolean);
+
   app.enableCors({
-    origin: '*',
-    methods: '*',
-    allowedHeaders: '*',
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    credentials: true,
   });
+
 
   app.useGlobalPipes(new ValidationPipe({
     whitelist: true,

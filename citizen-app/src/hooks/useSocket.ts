@@ -1,16 +1,17 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useEmergencyStore } from '@/store/useEmergencyStore';
 import { SOCKET_URL } from '@/lib/api';
 
-export const useSocket = (token?: string) => {
-  const socketRef = useRef<Socket | null>(null);
-  const { updateStatus, assignOfficer } = useEmergencyStore();
+export type SocketConnectionState = 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
 
-  useEffect(() => {
-    console.log('🔌 [CITIZEN SOCKET] Connecting to:', SOCKET_URL);
+// Singleton socket — prevents duplicate connections across renders and StrictMode
+let sharedSocket: Socket | null = null;
+let socketRefCount = 0;
 
-    const socket = io(SOCKET_URL, {
+function getSharedSocket(): Socket {
+  if (!sharedSocket) {
+    sharedSocket = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -18,75 +19,156 @@ export const useSocket = (token?: string) => {
       reconnectionDelayMax: 5000,
       timeout: 20000,
     });
+  }
+  socketRefCount++;
+  return sharedSocket;
+}
 
+function releaseSharedSocket() {
+  socketRefCount--;
+  if (socketRefCount <= 0 && sharedSocket) {
+    sharedSocket.disconnect();
+    sharedSocket = null;
+    socketRefCount = 0;
+  }
+}
+
+export const useSocket = (token?: string) => {
+  const socketRef = useRef<Socket | null>(null);
+  const [connectionState, setConnectionState] = useState<SocketConnectionState>('connecting');
+  const processedMessageIds = useRef<Set<string>>(new Set());
+  const lastSyncTime = useRef<number>(Date.now());
+
+  // Use refs for store callbacks to avoid re-triggering socket setup
+  const storeRef = useRef(useEmergencyStore.getState());
+  useEffect(() => {
+    storeRef.current = useEmergencyStore.getState();
+    const unsub = useEmergencyStore.subscribe((state) => {
+      storeRef.current = state;
+    });
+    return unsub;
+  }, []);
+
+  const handleEvent = useCallback((id: string | undefined, callback: () => void) => {
+    if (id && processedMessageIds.current.has(id)) {
+      console.log('♻️ [CITIZEN SOCKET] Duplicate ignored:', id);
+      return;
+    }
+    if (id) processedMessageIds.current.add(id);
+    callback();
+    lastSyncTime.current = Date.now();
+  }, []);
+
+  useEffect(() => {
+    const socket = getSharedSocket();
+
+    // Off before on to prevent listener stacking
+    socket.off('connect');
     socket.on('connect', () => {
       console.log('✅ [CITIZEN SOCKET] Connected:', socket.id);
+      setConnectionState('connected');
+      
+      const currentId = storeRef.current.id;
+      if (currentId) {
+        console.log('🛰️ [CITIZEN SOCKET] Joining incident room:', currentId);
+        socket.emit('citizen:track', { incidentId: currentId });
+      }
+
+      // SYNC CATCH-UP
+      socket.emit('emergency:sync', { lastTimestamp: lastSyncTime.current });
     });
 
+    socket.off('connect_error');
     socket.on('connect_error', (err) => {
       console.warn('⚠️ [CITIZEN SOCKET] Connection error:', err.message);
+      setConnectionState('reconnecting');
     });
 
+    socket.off('disconnect');
     socket.on('disconnect', (reason) => {
       console.warn('❌ [CITIZEN SOCKET] Disconnected:', reason);
+      setConnectionState('disconnected');
     });
 
+    socket.off('officer_location_update');
     socket.on('officer_location_update', (data) => {
-      const currentId = useEmergencyStore.getState().id;
+      const currentId = storeRef.current.id;
       if (data.id === currentId || data.citizenId === 'CIT-12345') {
-        console.log('🛰️ [OFFICER MOVED] New Coords:', data.lat, data.lng);
-        const currentOfficer = useEmergencyStore.getState().officer;
+        const currentOfficer = storeRef.current.officer;
         if (currentOfficer) {
-          assignOfficer({
+          storeRef.current.assignOfficer({
             ...currentOfficer,
-            lat: data.lat,
-            lng: data.lng,
+            latitude: data.latitude || data.lat,
+            longitude: data.longitude || data.lng,
           });
         }
       }
     });
 
-    socket.on('emergency:update', (data) => {
-      const currentId = useEmergencyStore.getState().id;
+    socket.off('navigation:update');
+    socket.on('navigation:update', (data) => {
+      const currentId = storeRef.current.id;
       if (data.id === currentId) {
-        console.log('🔄 [CITIZEN REALTIME] Status Update:', data.status);
-        
-        // Terminal states — resolve/complete the incident on citizen side
-        if (data.status === 'resolved' || data.status === 'completed') {
-          updateStatus('COMPLETED');
-          return;
-        }
-        
-        if (data.status === 'cancelled') {
-          updateStatus('CANCELLED');
-          return;
-        }
-        
-        // Officer responding states — update officer info
-        if (data.status === 'assigned' || data.status === 'enroute' || data.status === 'arrived') {
-          assignOfficer({
-            id: data.officerId || 'OFF-123',
-            name: data.officerName || 'Officer Response Team',
-            badge: data.officerBadge || 'OFF-9921',
-            phone: data.officerPhone || '+1 555-0123',
-            lat: data.location?.lat || 0,
-            lng: data.location?.lng || 0,
-            eta: data.status === 'arrived' ? 'Arrived' : '4 Min',
-          });
-        }
-        
-        // Map status correctly — 'arrived' stays as ARRIVED, not COMPLETED
-        updateStatus(data.status.toUpperCase());
+        window.dispatchEvent(new CustomEvent('navigation:update', { detail: data }));
       }
     });
+
+    socket.off('emergency:update');
+    socket.on('emergency:update', (data: any & { msgId?: string }) => {
+      handleEvent(data.msgId, () => {
+        const currentId = storeRef.current.id;
+        if (data.id === currentId) {
+          if (data.status === 'resolved' || data.status === 'completed') {
+            storeRef.current.updateStatus('COMPLETED');
+            return;
+          }
+          if (data.status === 'cancelled') {
+            storeRef.current.updateStatus('CANCELLED');
+            return;
+          }
+          if (['assigned', 'enroute', 'arrived'].includes(data.status)) {
+            storeRef.current.assignOfficer({
+              id: data.officerId || 'OFF-123',
+              name: data.officerName || 'Officer Response Team',
+              badge: data.officerBadge || 'OFF-9921',
+              phone: data.officerPhone || '+1 555-0123',
+              latitude: data.location?.lat || data.latitude || 0,
+              longitude: data.location?.lng || data.longitude || 0,
+              eta: data.status === 'arrived' ? 'Arrived' : '4 Min',
+            });
+          }
+          const mappedStatus = data.status === 'enroute' ? 'EN_ROUTE' : data.status.toUpperCase();
+          storeRef.current.updateStatus(mappedStatus);
+        }
+      });
+    });
+
+    if (socket.connected) {
+      setConnectionState('connected');
+    }
 
     socketRef.current = socket;
 
     return () => {
-      console.log('🔌 [CITIZEN SOCKET] Disconnecting...');
-      socket.disconnect();
+      socket.off('connect');
+      socket.off('disconnect');
+      socket.off('connect_error');
+      socket.off('officer_location_update');
+      socket.off('navigation:update');
+      socket.off('emergency:update');
+      releaseSharedSocket();
     };
-  }, [updateStatus, assignOfficer]);
+  }, [handleEvent]);
 
-  return socketRef.current;
+  // Handle dynamic room joining when ID changes
+  const incidentId = useEmergencyStore((s) => s.id);
+  useEffect(() => {
+    if (incidentId && socketRef.current?.connected) {
+      console.log('🛰️ [CITIZEN SOCKET] Dynamic room join:', incidentId);
+      socketRef.current.emit('citizen:track', { incidentId });
+    }
+  }, [incidentId]);
+
+  return { socket: socketRef.current, connectionState };
 };
+

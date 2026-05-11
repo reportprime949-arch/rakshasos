@@ -5,12 +5,15 @@ export type DispatchAlert = {
   citizenName: string;
   latitude: number;
   longitude: number;
-  lat?: number; // Optional for backward compatibility during transition
-  lng?: number; // Optional for backward compatibility during transition
+  lat?: number;
+  lng?: number;
   description: string;
   status: string;
   emergencyType?: string;
   createdAt?: string;
+  assignedOfficerId?: string;
+  officerName?: string;
+  distanceKm?: number;
 };
 
 interface OfficerState {
@@ -22,8 +25,11 @@ interface OfficerState {
   status: 'IDLE' | 'ASSIGNED' | 'EN_ROUTE' | 'ARRIVED' | 'RESOLVED' | 'COMPLETED';
   socketStatus: 'CONNECTED' | 'DISCONNECTED' | 'CONNECTING';
   backendStatus: 'HEALTHY' | 'UNREACHABLE';
+  firestoreStatus: 'SYNCED' | 'ERROR' | 'INITIALIZING';
   isLoading: boolean;
-  
+  audioMuted: boolean;
+  lastSOSId: string | null;
+
   // Actions
   setOnline: (online: boolean) => void;
   setDispatch: (dispatch: DispatchAlert | null) => void;
@@ -34,77 +40,108 @@ interface OfficerState {
   setStatus: (status: OfficerState['status']) => void;
   setSocketStatus: (status: OfficerState['socketStatus']) => void;
   setBackendStatus: (status: OfficerState['backendStatus']) => void;
+  setFirestoreStatus: (status: OfficerState['firestoreStatus']) => void;
   setLoading: (loading: boolean) => void;
+  setAudioMuted: (muted: boolean) => void;
+  setLastSOSId: (id: string | null) => void;
   clearDispatch: () => void;
+  reset: () => void;
 }
+
+function resolveStatus(statusStr?: string): OfficerState['status'] {
+  if (!statusStr) return 'ASSIGNED';
+  const s = statusStr.toUpperCase();
+  if (s === 'ENROUTE' || s === 'EN_ROUTE') return 'EN_ROUTE';
+  if (s === 'ARRIVED') return 'ARRIVED';
+  if (s === 'RESOLVED') return 'RESOLVED';
+  if (s === 'COMPLETED') return 'COMPLETED';
+  if (s === 'ASSIGNED') return 'ASSIGNED';
+  return 'ASSIGNED';
+}
+
+const initialState = {
+  activeDispatch: null as DispatchAlert | null,
+  activeIncidents: [] as DispatchAlert[],
+  status: 'IDLE' as const,
+  socketStatus: 'DISCONNECTED' as const,
+  backendStatus: 'HEALTHY' as const,
+  firestoreStatus: 'INITIALIZING' as const,
+  isLoading: true,
+  audioMuted: false,
+  lastSOSId: null as string | null,
+};
 
 export const useOfficerStore = create<OfficerState>((set) => ({
   officerId: 'OFF-9921',
   officerName: 'Officer Miller',
   isOnline: true,
-  activeDispatch: null,
-  activeIncidents: [],
-  status: 'IDLE',
-  socketStatus: 'DISCONNECTED',
-  backendStatus: 'HEALTHY',
-  isLoading: true,
+  ...initialState,
 
   setOnline: (online) => set({ isOnline: online }),
-  setDispatch: (dispatch) => set((state) => {
-    // Determine the status based on the dispatch object if it exists
-    let newStatus: OfficerState['status'] = 'IDLE';
-    if (dispatch) {
-      const s = dispatch.status?.toUpperCase();
-      if (s === 'ENROUTE' || s === 'EN_ROUTE') newStatus = 'EN_ROUTE';
-      else if (s === 'ARRIVED') newStatus = 'ARRIVED';
-      else if (s === 'RESOLVED') newStatus = 'RESOLVED';
-      else if (s === 'COMPLETED') newStatus = 'COMPLETED';
-      else newStatus = 'ASSIGNED';
-    }
-    
-    return { 
-      activeDispatch: dispatch, 
-      status: newStatus
-    };
-  }),
+
+  setDispatch: (dispatch) =>
+    set(() => ({
+      activeDispatch: dispatch,
+      status: dispatch ? resolveStatus(dispatch.status) : 'IDLE',
+    })),
+
   setIncidents: (incidents) => set({ activeIncidents: incidents, isLoading: false }),
-  addIncident: (incident) => set((state) => {
-    if (state.activeIncidents.find(i => i.id === incident.id)) return state;
-    return { activeIncidents: [incident, ...state.activeIncidents] };
-  }),
-  updateIncident: (incident) => set((state) => {
-    const updatedIncidents = state.activeIncidents.map(i => i.id === incident.id ? { ...i, ...incident } : i);
-    
-    // ALSO update activeDispatch if this is the currently handled incident
-    let updatedDispatch = state.activeDispatch;
-    let updatedStatus = state.status;
-    
-    if (state.activeDispatch && state.activeDispatch.id === incident.id) {
-      updatedDispatch = { ...state.activeDispatch, ...incident };
-      
-      // Update status if provided
-      if (incident.status) {
-        const s = incident.status.toUpperCase();
-        if (s === 'ENROUTE' || s === 'EN_ROUTE') updatedStatus = 'EN_ROUTE';
-        else if (s === 'ARRIVED') updatedStatus = 'ARRIVED';
-        else if (s === 'RESOLVED') updatedStatus = 'RESOLVED';
-        else if (s === 'COMPLETED') updatedStatus = 'COMPLETED';
-        else if (s === 'ASSIGNED') updatedStatus = 'ASSIGNED';
+
+  addIncident: (incident) =>
+    set((state) => {
+      if (state.activeIncidents.some((i) => i.id === incident.id)) return state;
+      return { activeIncidents: [incident, ...state.activeIncidents] };
+    }),
+
+  updateIncident: (incident) =>
+    set((state) => {
+      const updatedIncidents = state.activeIncidents.map((i) =>
+        i.id === incident.id ? { ...i, ...incident } : i,
+      );
+
+      let updatedDispatch = state.activeDispatch;
+      let updatedStatus = state.status;
+
+      if (state.activeDispatch && state.activeDispatch.id === incident.id) {
+        updatedDispatch = { ...state.activeDispatch, ...incident };
+        if (incident.status) {
+          updatedStatus = resolveStatus(incident.status);
+        }
       }
-    }
-    
-    return { 
-      activeIncidents: updatedIncidents,
-      activeDispatch: updatedDispatch,
-      status: updatedStatus
-    };
-  }),
-  removeIncident: (id) => set((state) => ({
-    activeIncidents: state.activeIncidents.filter(i => i.id !== id)
-  })),
+
+      return {
+        activeIncidents: updatedIncidents,
+        activeDispatch: updatedDispatch,
+        status: updatedStatus,
+      };
+    }),
+
+  removeIncident: (id) =>
+    set((state) => {
+      const newState: Partial<OfficerState> = {
+        activeIncidents: state.activeIncidents.filter((i) => i.id !== id),
+      };
+      // Also clear dispatch if it matches the removed incident
+      if (state.activeDispatch?.id === id) {
+        newState.activeDispatch = null;
+        newState.status = 'IDLE';
+      }
+      return newState;
+    }),
+
   setStatus: (status) => set({ status }),
   setSocketStatus: (status) => set({ socketStatus: status }),
   setBackendStatus: (status) => set({ backendStatus: status }),
+  setFirestoreStatus: (status) => set({ firestoreStatus: status }),
   setLoading: (loading) => set({ isLoading: loading }),
+  setAudioMuted: (muted) => set({ audioMuted: muted }),
+  setLastSOSId: (id) => set({ lastSOSId: id }),
   clearDispatch: () => set({ activeDispatch: null, status: 'IDLE' }),
+  reset: () =>
+    set((state) => ({
+      ...initialState,
+      officerId: state.officerId,
+      officerName: state.officerName,
+      isOnline: state.isOnline,
+    })),
 }));

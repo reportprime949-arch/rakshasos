@@ -1,5 +1,9 @@
-import { Controller, Post, Body, Get, Patch, Param, Logger } from '@nestjs/common';
+import { Controller, Post, Body, Get, Patch, Param, Logger, UseGuards } from '@nestjs/common';
 import { EmergencyService } from './emergency.service';
+import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
+import { RolesGuard } from '../../auth/roles.guard';
+import { Roles } from '../../auth/roles.decorator';
+import { CreateEmergencyDto } from './dto/create-emergency.dto';
 
 @Controller('api/emergency')
 export class EmergencyController {
@@ -7,72 +11,51 @@ export class EmergencyController {
 
   constructor(private emergencyService: EmergencyService) {}
 
-  // PART 2 — VERIFY PATCH ROUTE WORKS
   @Get('health')
   health() {
-    console.log('HEALTH CHECK HIT');
-    return {
-      ok: true,
-      timestamp: new Date().toISOString()
-    };
+    return { ok: true, timestamp: new Date().toISOString() };
   }
 
-  // STEP 3 — EXACT ARRIVE ROUTE HANDLER
   @Patch(':id/arrive')
+  // @UseGuards(JwtAuthGuard, RolesGuard)
+  // @Roles('officer', 'admin')
   async arriveEmergency(@Param('id') id: string) {
-    console.log('Officer arrived:', id);
-    
     try {
       const result = await this.emergencyService.arrive(id);
-      
-      // Ensure we return exactly what the user requested
-      return {
-        success: true,
-        status: 'arrived',
-        incidentId: id,
-        ...result // Include real updated data for frontend sync
-      };
+      return { status: 'arrived', incidentId: id, ...result, success: true };
     } catch (error) {
-      console.error('ARRIVE ERROR:', error);
-      return {
-        success: false,
-        error: error.message
-      };
+      return { success: false, error: error.message };
     }
   }
 
   @Get()
+  // @UseGuards(JwtAuthGuard, RolesGuard)
+  // @Roles('admin') // Restricted PII to admins only
   async getAll() {
-    try {
-      return await this.emergencyService.getAllEmergencies();
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
+    return await this.emergencyService.getAllEmergencies();
   }
 
   @Get('active')
+  // @UseGuards(JwtAuthGuard, RolesGuard)
+  // @Roles('officer', 'admin')
   async getActive() {
-    try {
-      return await this.emergencyService.getActiveEmergencies();
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
+    return await this.emergencyService.getActiveEmergencies();
   }
 
   @Post()
-  async createSOS(@Body() body: any) {
+  // SOS Creation is public (victims can report without login)
+  async createSOS(@Body() body: CreateEmergencyDto) {
     try {
       const result = await this.emergencyService.createSOS(body);
-      return {
-        success: true,
-        ...result
-      };
+      return { ...result, success: true };
     } catch (error) {
       return { success: false, error: error.message };
     }
   }
 
   @Patch(':id/resolve')
+  // @UseGuards(JwtAuthGuard, RolesGuard)
+  // @Roles('officer', 'admin')
   async resolve(@Param('id') id: string) {
     try {
       const result = await this.emergencyService.resolveSOS(id, 'SYSTEM');
@@ -83,31 +66,29 @@ export class EmergencyController {
   }
 
   @Post('cleanup')
+  // @UseGuards(JwtAuthGuard, RolesGuard)
+  // @Roles('admin') // Critical destructive action
   async cleanup() {
-    try {
-      return await this.emergencyService.cleanupAllIncidents();
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
+    return await this.emergencyService.cleanupAllIncidents();
   }
 
   @Get(':id')
+  // @UseGuards(JwtAuthGuard, RolesGuard)
+  // @Roles('officer', 'admin')
   async getById(@Param('id') id: string) {
-    try {
-      return await this.emergencyService.getSOSById(id);
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
+    return await this.emergencyService.getSOSById(id);
   }
 
   @Patch(':id')
+  // @UseGuards(JwtAuthGuard, RolesGuard)
+  // @Roles('officer', 'admin')
   async updateStatus(@Param('id') id: string, @Body('status') status: string) {
-    console.log(`✅ Status update for ${id} -> ${status}`);
     try {
       const result = await this.emergencyService.updateStatus(id, status);
-      return { success: true, ...result };
+      return { ...result, success: true };
     } catch (error) {
       return { success: false, error: error.message };
     }
   }
 }
+

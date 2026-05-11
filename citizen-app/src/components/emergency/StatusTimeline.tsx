@@ -11,7 +11,7 @@ interface TimelineItemProps {
   isLast?: boolean;
 }
 
-const TimelineItem = ({ label, isActive, isCompleted, icon, isLast }: TimelineItemProps) => (
+const TimelineItem = React.memo(({ label, isActive, isCompleted, icon, isLast }: TimelineItemProps) => (
   <div className="flex items-start space-x-4">
     <div className="flex flex-col items-center">
       <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
@@ -30,9 +30,9 @@ const TimelineItem = ({ label, isActive, isCompleted, icon, isLast }: TimelineIt
       </p>
     </div>
   </div>
-);
+));
 
-export const StatusTimeline = ({ currentStatus }: { currentStatus: EmergencyStatus }) => {
+export const StatusTimeline = React.memo(({ currentStatus }: { currentStatus: EmergencyStatus }) => {
   const steps = [
     { id: 'SEARCHING', label: 'Searching Dispatch', icon: <MapPin size={16} /> },
     { id: 'ASSIGNED', label: 'Officer Assigned', icon: <UserCheck size={16} /> },
@@ -61,4 +61,5 @@ export const StatusTimeline = ({ currentStatus }: { currentStatus: EmergencyStat
       ))}
     </div>
   );
-};
+});
+
