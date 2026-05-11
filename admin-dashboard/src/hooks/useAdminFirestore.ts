@@ -8,7 +8,7 @@ export const useAdminFirestore = () => {
 
   useEffect(() => {
     const pollInterval = setInterval(async () => {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com';
       try {
         const response = await fetch(`${API_URL}/api/emergency`);
         const emergencies = await response.json();

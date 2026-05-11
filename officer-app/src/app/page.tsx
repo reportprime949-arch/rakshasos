@@ -1,21 +1,16 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Shield,
-  AlertTriangle,
   Navigation,
   CheckCircle,
-  MapPin,
-  Clock,
-  ArrowRight,
-  Wifi,
-  Activity,
   Zap,
   Radio,
   Volume2,
   VolumeX,
+  Activity,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useOfficerStore } from '@/store/useOfficerStore';
@@ -28,7 +23,6 @@ import { IncidentTimeline } from '@/components/CommandCenter/IncidentTimeline';
 import { LocationPermissionModal } from '@/components/CommandCenter/LocationPermissionModal';
 import { ResolutionSuccessModal } from '@/components/CommandCenter/ResolutionSuccessModal';
 
-// Dynamic import for Map to prevent SSR issues
 const OfficerLiveMap = dynamic(
   () => import('@/components/CommandCenter/OfficerLiveMap'),
   {
@@ -41,16 +35,12 @@ const OfficerLiveMap = dynamic(
   },
 );
 
-// ============================================================
-// CONSTANTS
-// ============================================================
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
-const POLL_INTERVAL = 15000; // Safety-net polling every 15s
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com';
+const POLL_INTERVAL = 15000;
 
 export default function OfficerHome() {
   const [mounted, setMounted] = useState(false);
 
-  // Atomic Zustand Selectors — each triggers re-render ONLY when its slice changes
   const isOnline = useOfficerStore((s) => s.isOnline);
   const activeDispatch = useOfficerStore((s) => s.activeDispatch);
   const activeIncidents = useOfficerStore((s) => s.activeIncidents);
@@ -76,15 +66,11 @@ export default function OfficerHome() {
   const [isAlarmActive, setIsAlarmActive] = useState(false);
   const [showMapMobile, setShowMapMobile] = useState(false);
 
-  // ----------------------------------------------------------
-  // HOOKS
-  // ----------------------------------------------------------
   const { acceptIncident: emitAccept, emitLocationUpdate } = useOfficerSocket(officerId, officerName);
   const { location, locationError } = useOfficerLocation(officerId, officerName, emitLocationUpdate);
   const { acceptEmergency } = useOfficerFirestore(location);
   const { playAlarm, stopAlarm, toggleMute, onAlarmActiveChange } = useAlarmSystem();
 
-  // Bridge alarm active state to React state (ref -> state)
   useEffect(() => {
     onAlarmActiveChange.current = (active: boolean) => {
       setIsAlarmActive(active);
@@ -94,16 +80,10 @@ export default function OfficerHome() {
     };
   }, [onAlarmActiveChange]);
 
-  // ----------------------------------------------------------
-  // MOUNT
-  // ----------------------------------------------------------
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // ----------------------------------------------------------
-  // FETCH INCIDENTS (initial + periodic safety-net polling)
-  // ----------------------------------------------------------
   const fetchIncidents = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/api/emergency/active`, { cache: 'no-store' });
@@ -114,22 +94,14 @@ export default function OfficerHome() {
       const data = await res.json();
       setBackendStatus('HEALTHY');
 
-      console.log('📡 [POLL] Fetched', data.length, 'active incidents from backend');
-
-      // Show all non-resolved incidents (pending, searching, assigned, enroute, arrived)
       const filtered = data.filter(
         (i: any) => i.status !== 'resolved' && i.status !== 'completed' && i.status !== 'cancelled',
       );
 
-      // Merge with existing socket-pushed incidents to prevent data loss
       const existingIncidents = useOfficerStore.getState().activeIncidents;
       const mergedMap = new Map<string, any>();
-      
-      // Add existing socket-pushed incidents first
       existingIncidents.forEach(inc => mergedMap.set(inc.id, inc));
-      // Overwrite with fresh backend data (source of truth)
       filtered.forEach((inc: any) => mergedMap.set(inc.id, inc));
-      
       const merged = Array.from(mergedMap.values());
       setIncidents(merged);
 
@@ -156,16 +128,10 @@ export default function OfficerHome() {
     return () => clearInterval(interval);
   }, [fetchIncidents]);
 
-  // ----------------------------------------------------------
-  // LOCATION PERMISSION MODAL
-  // ----------------------------------------------------------
   useEffect(() => {
     setShowPermissionModal(!!locationError);
   }, [locationError]);
 
-  // ----------------------------------------------------------
-  // INCIDENT ACTIONS
-  // ----------------------------------------------------------
   const handleAcceptIncident = useCallback(
     async (id: string) => {
       stopAlarm();
@@ -243,9 +209,6 @@ export default function OfficerHome() {
 
   if (!mounted) return null;
 
-  // ----------------------------------------------------------
-  // RENDER
-  // ----------------------------------------------------------
   return (
     <main
       className={`h-screen bg-[#050505] text-[#f5f5f5] flex overflow-hidden font-sans selection:bg-red-500/30 transition-all duration-700 transform-gpu will-change-[filter,box-shadow] ${
@@ -254,7 +217,6 @@ export default function OfficerHome() {
           : ''
       }`}
     >
-      {/* Emergency Vignette */}
       <AnimatePresence>
         {isAlarmActive && (
           <motion.div
@@ -296,7 +258,6 @@ export default function OfficerHome() {
               </h1>
             </div>
             <div className="flex items-center space-x-2">
-              {/* Mute Toggle */}
               <button
                 onClick={toggleMute}
                 className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all border ${
@@ -308,7 +269,6 @@ export default function OfficerHome() {
               >
                 {audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
               </button>
-              {/* Online Toggle */}
               <button
                 onClick={() => setOnline(!isOnline)}
                 className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all border ${

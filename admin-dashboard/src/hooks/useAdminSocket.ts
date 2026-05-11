@@ -7,7 +7,7 @@ export const useAdminSocket = (token?: string) => {
   const { addEmergency, updateEmergency, updateOfficerLocation } = useAdminStore();
 
   useEffect(() => {
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com';
+    const API_URL = process.env. || 'https://rakshasos-backend.onrender.com';
     console.log('🔌 [ADMIN SOCKET] Connecting to:', API_URL);
 
     const socket = io(API_URL, {

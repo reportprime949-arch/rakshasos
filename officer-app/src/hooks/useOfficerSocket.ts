@@ -2,19 +2,16 @@ import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useOfficerStore, DispatchAlert } from '@/store/useOfficerStore';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com';
 
 // ============================================================
 // SINGLETON SOCKET MANAGER
-// Single socket instance across the entire application.
-// Ref-counted: created on first consumer, destroyed when last consumer unmounts.
 // ============================================================
 let sharedSocket: Socket | null = null;
 let socketRefCount = 0;
 
 function getSharedSocket(): Socket {
   if (!sharedSocket) {
-    console.log('🔌 [OFFICER SOCKET] Creating new shared socket to:', API_URL);
     sharedSocket = io(API_URL, {
       transports: ['websocket', 'polling'],
       reconnection: true,
@@ -48,7 +45,6 @@ export const useOfficerSocket = (officerId: string, officerName: string) => {
   const processedIds = useRef<Set<string>>(new Set());
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Direct store access (no React subscription — avoids rerender loops)
   const getStore = useCallback(() => useOfficerStore.getState(), []);
 
   useEffect(() => {
@@ -57,14 +53,10 @@ export const useOfficerSocket = (officerId: string, officerName: string) => {
     const socket = getSharedSocket();
     socketRef.current = socket;
 
-    // ----------------------------------------------------------
-    // HELPERS
-    // ----------------------------------------------------------
     const isDuplicate = (msgId?: string): boolean => {
       if (!msgId) return false;
       if (processedIds.current.has(msgId)) return true;
       processedIds.current.add(msgId);
-      // Cap set size to prevent memory leak
       if (processedIds.current.size > 500) {
         const arr = Array.from(processedIds.current);
         processedIds.current = new Set(arr.slice(arr.length - 200));
@@ -72,9 +64,6 @@ export const useOfficerSocket = (officerId: string, officerName: string) => {
       return false;
     };
 
-    // ----------------------------------------------------------
-    // REGISTER LISTENERS (off first to prevent stacking)
-    // ----------------------------------------------------------
     socket.off('connect');
     socket.on('connect', () => {
       console.log('✅ [OFFICER SOCKET] Connected:', socket.id);
@@ -85,7 +74,6 @@ export const useOfficerSocket = (officerId: string, officerName: string) => {
         status: 'online',
         timestamp: Date.now(),
       });
-      // Sync catch-up on every (re)connect
       socket.emit('emergency:sync', { lastTimestamp: Date.now() - 30000 });
     });
 
@@ -114,32 +102,15 @@ export const useOfficerSocket = (officerId: string, officerName: string) => {
 
     socket.off('emergency:new');
     socket.on('emergency:new', (incident: DispatchAlert & { msgId?: string }) => {
-      if (isDuplicate(incident.msgId)) {
-        console.log('♻️ [OFFICER SOCKET] Duplicate emergency:new ignored:', incident.msgId);
-        return;
-      }
-      
-      console.log('══════════════════════════════════════════');
-      console.log('🚨 [OFFICER SOCKET] NEW EMERGENCY RECEIVED!');
-      console.log('🚨 [OFFICER SOCKET] ID:', incident.id);
-      console.log('🚨 [OFFICER SOCKET] Citizen:', incident.citizenName);
-      console.log('🚨 [OFFICER SOCKET] Status:', incident.status);
-      console.log('🚨 [OFFICER SOCKET] Location:', incident.latitude, incident.longitude);
-      console.log('══════════════════════════════════════════');
-      
+      if (isDuplicate(incident.msgId)) return;
+      console.log('🚨 [OFFICER SOCKET] NEW EMERGENCY:', incident.id, incident.citizenName);
       getStore().addIncident(incident);
-      
-      // Notify alarm system
-      console.log('🔔 [OFFICER SOCKET] Dispatching raksha:new-sos event for alarm...');
       window.dispatchEvent(new CustomEvent('raksha:new-sos', { detail: { id: incident.id } }));
     });
 
     socket.off('emergency:update');
     socket.on('emergency:update', (incident: DispatchAlert & { msgId?: string }) => {
       if (isDuplicate(incident.msgId)) return;
-      
-      console.log('🔄 [OFFICER SOCKET] emergency:update —', incident.id, '→', incident.status);
-      
       const store = getStore();
       if (incident.status === 'resolved' || incident.status === 'completed') {
         store.removeIncident(incident.id);
@@ -150,7 +121,6 @@ export const useOfficerSocket = (officerId: string, officerName: string) => {
 
     socket.off('emergency:resolved');
     socket.on('emergency:resolved', ({ incidentId }: { incidentId: string }) => {
-      console.log('✅ [OFFICER SOCKET] emergency:resolved —', incidentId);
       getStore().removeIncident(incidentId);
     });
 
@@ -162,31 +132,18 @@ export const useOfficerSocket = (officerId: string, officerName: string) => {
       }
     });
 
-    // Server heartbeat response
     socket.off('pong');
-    socket.on('pong' as any, () => {
-      // Connection alive — no action needed
-    });
+    socket.on('pong' as any, () => {});
 
-    // If already connected (e.g. HMR), fire join immediately
     if (socket.connected) {
-      console.log('🔄 [OFFICER SOCKET] Already connected — sending officer:join');
       getStore().setSocketStatus('CONNECTED');
       socket.emit('officer:join', { officerId, officerName, status: 'online' });
     }
 
-    // ----------------------------------------------------------
-    // HEARTBEAT: ping every 30s to detect stale connections
-    // ----------------------------------------------------------
     heartbeatRef.current = setInterval(() => {
-      if (socket.connected) {
-        socket.emit('ping');
-      }
+      if (socket.connected) socket.emit('ping');
     }, 30000);
 
-    // ----------------------------------------------------------
-    // CLEANUP
-    // ----------------------------------------------------------
     return () => {
       socket.off('connect');
       socket.off('disconnect');
@@ -209,13 +166,9 @@ export const useOfficerSocket = (officerId: string, officerName: string) => {
     };
   }, [officerId, officerName, getStore]);
 
-  // ----------------------------------------------------------
-  // ACTIONS
-  // ----------------------------------------------------------
   const acceptIncident = useCallback(
     (incidentId: string, offId: string) => {
       if (socketRef.current?.connected) {
-        console.log('📡 [OFFICER SOCKET] Emitting officer:accept for', incidentId);
         socketRef.current.emit('officer:accept', {
           id: incidentId,
           officerId: offId,

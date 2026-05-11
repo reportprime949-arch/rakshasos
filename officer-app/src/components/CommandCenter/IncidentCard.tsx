@@ -36,7 +36,6 @@ export const IncidentCard = React.memo(
           }
         `}</style>
 
-        {/* CSS-only Glow Effect (replaces framer-motion infinite loop) */}
         {isPriority && (
           <div
             className="glow-pulse absolute inset-0 bg-red-500/10 pointer-events-none"

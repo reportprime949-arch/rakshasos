@@ -123,7 +123,7 @@ export const useOfficerFirestore = (
   // ----------------------------------------------------------
   const acceptEmergency = useCallback(
     async (id: string) => {
-      const URL = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/emergency/${id}`;
+      const URL = `${process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com'}/api/emergency/${id}`;
 
       try {
         const response = await fetch(URL, {

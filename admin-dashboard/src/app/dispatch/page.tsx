@@ -23,7 +23,7 @@ export default function DispatchPanel() {
   useEffect(() => {
     // Real-time interval for fetching data
     const fetchData = async () => {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com';
       try {
         const [incRes, offRes] = await Promise.all([
           fetch(`${API_URL}/api/emergency`),

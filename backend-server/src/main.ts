@@ -20,24 +20,30 @@ async function bootstrap() {
     message: 'Security threshold reached. Please try again later.',
   }));
 
-  // STEP 3 — ENABLE STRICT CORS
+  // STEP 3 — PRODUCTION CORS
   const allowedOrigins = [
-    'http://localhost:3000', // Citizen Legacy
-    'http://localhost:3003', // Citizen Current
-    'http://localhost:3001', // Officer
-    'http://localhost:3002', // Admin
-    process.env.FRONTEND_URL, // Production
-  ].filter(Boolean);
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:3002',
+    'http://localhost:3003',
+
+    'https://rakshasos.vercel.app',
+    'https://rakshasos-3tro.vercel.app',
+
+    process.env.FRONTEND_URL,
+  ].filter(Boolean) as string[];
 
   app.enableCors({
     origin: (origin, callback) => {
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
+        logger.warn(`🚫 CORS blocked origin: ${origin}`);
         callback(new Error('Not allowed by CORS'));
       }
     },
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   });
 

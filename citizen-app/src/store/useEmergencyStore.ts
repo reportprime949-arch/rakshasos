@@ -7,7 +7,7 @@ import { gpsManager } from '@/utils/GeolocationManager';
 import { API_URL } from '@/lib/api';
 
 
-export type EmergencyStatus = 
+export type EmergencyStatus =
   | 'IDLE'
   | 'COUNTDOWN'
   | 'SEARCHING'
@@ -33,7 +33,7 @@ interface EmergencyState {
     eta: string;
   } | null;
   error: string | null;
-  
+
   // Actions
   startCountdown: () => void;
   triggerSOS: (citizenName: string, citizenId: string) => Promise<any>;
@@ -66,18 +66,18 @@ export const useEmergencyStore = create<EmergencyState>()(
       const savedId = localStorage.getItem('rakshasos_active_id');
       if (!savedId || get().id) return;
       console.log('🔄 [RECOVERY] Verifying incident with backend:', savedId);
-      
+
       try {
         const res = await fetch(`${API_URL}/api/emergency/${savedId}`, { cache: 'no-store' });
         if (!res.ok) throw new Error('Not found');
         const data = await res.json();
-        
+
         if (!data || data.status === 'resolved' || data.status === 'cancelled' || data.status === 'completed') {
           console.log('🧹 [RECOVERY] Incident resolved/gone — resetting to IDLE');
           get().reset();
           return;
         }
-        
+
         console.log('✅ [RECOVERY] Active incident found:', savedId, 'status:', data.status);
         set({ id: savedId, status: 'SEARCHING' });
       } catch {
@@ -110,7 +110,7 @@ export const useEmergencyStore = create<EmergencyState>()(
       console.log('🚨 [SOS] citizenName:', citizenName);
       console.log('🚨 [SOS] citizenId:', citizenId);
       console.log('🚨 [SOS] timestamp:', new Date().toISOString());
-      
+
       const startTime = Date.now();
       let latitude = 0;
       let longitude = 0;
@@ -131,7 +131,7 @@ export const useEmergencyStore = create<EmergencyState>()(
             new Promise<GeolocationPosition>((resolve, reject) => {
               if (typeof window === 'undefined' || !navigator.geolocation) return reject(new Error('No GPS'));
               navigator.geolocation.getCurrentPosition(resolve, reject, {
-                enableHighAccuracy: true, timeout: 3000, maximumAge: 0 
+                enableHighAccuracy: true, timeout: 3000, maximumAge: 0
               });
             }),
             new Promise<null>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 3500))
@@ -169,7 +169,7 @@ export const useEmergencyStore = create<EmergencyState>()(
       // ── STEP 3: POST to backend ──
       try {
         console.log('🌐 [SOS] Step 3: Sending POST to', `${API_URL}/api/emergency`);
-        
+
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 15000);
 
@@ -196,7 +196,7 @@ export const useEmergencyStore = create<EmergencyState>()(
 
         if (result?.success && result?.id) {
           console.log('🎯 [SOS] Emergency created! ID:', result.id);
-          
+
           // ── STEP 4: Update local state ──
           try { localStorage.setItem('rakshasos_active_id', result.id); } catch { /* SSR */ }
           set({
@@ -219,7 +219,7 @@ export const useEmergencyStore = create<EmergencyState>()(
           console.log('✅ [SOS] PIPELINE COMPLETE — Emergency', result.id, 'active');
           console.log('⏱️ [SOS] Total time:', Date.now() - startTime, 'ms');
           console.log('══════════════════════════════════════════');
-          
+
           return result;
         } else {
           console.error('❌ [SOS] Backend response missing success/id:', result);
@@ -259,7 +259,7 @@ export const useEmergencyStore = create<EmergencyState>()(
 
     syncWithFirestore: () => {
       const id = get().id;
-      if (!id || activeSyncId === id) return () => {};
+      if (!id || activeSyncId === id) return () => { };
       activeSyncId = id;
       console.log('🛰️ [STORE] Starting Firestore Sync for:', id);
       const unsub = onSnapshot(doc(db, 'emergencies', id), (docSnap) => {
@@ -297,9 +297,9 @@ export const useEmergencyStore = create<EmergencyState>()(
           } catch (err) { console.error('🛰️ [GPS PUSH ERROR]', err); }
         }
       }, 5000);
-      return () => { 
-        unsub(); 
-        clearInterval(gpsInterval); 
+      return () => {
+        unsub();
+        clearInterval(gpsInterval);
         if (activeSyncId === id) activeSyncId = null;
       };
     }
