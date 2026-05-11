@@ -3,6 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import { useOfficerStore, DispatchAlert } from '@/store/useOfficerStore';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com';
+const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || API_URL;
 
 // ============================================================
 // SINGLETON SOCKET MANAGER
@@ -12,7 +13,8 @@ let socketRefCount = 0;
 
 function getSharedSocket(): Socket {
   if (!sharedSocket) {
-    sharedSocket = io(API_URL, {
+    console.log('🔌 [OFFICER SOCKET] Creating socket to:', SOCKET_URL);
+    sharedSocket = io(SOCKET_URL, {
       // CRITICAL: polling first, then upgrade to websocket on Render
       transports: ['polling', 'websocket'],
       upgrade: true,

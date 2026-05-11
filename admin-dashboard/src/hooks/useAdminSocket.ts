@@ -7,12 +7,15 @@ export const useAdminSocket = (token?: string) => {
   const { addEmergency, updateEmergency, updateOfficerLocation } = useAdminStore();
 
   useEffect(() => {
-    const API_URL = process.env. || 'https://rakshasos-backend.onrender.com';
-    console.log('🔌 [ADMIN SOCKET] Connecting to:', API_URL);
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rakshasos-backend.onrender.com';
+    const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || API_URL;
+    console.log('🔌 [ADMIN SOCKET] Connecting to:', SOCKET_URL);
 
-    const socket = io(API_URL, {
-      transports: ['websocket'],
+    const socket = io(SOCKET_URL, {
+      transports: ['polling', 'websocket'],
+      upgrade: true,
       reconnection: true,
+      timeout: 30000,
     });
 
     socket.on('connect', () => {

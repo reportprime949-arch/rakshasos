@@ -43,8 +43,8 @@ export async function safeFetch(url: string, options?: RequestInit) {
   const fetchPromise = (async () => {
     try {
       const controller = new AbortController();
-      // 30s timeout — Render cold starts can take 15-30s
-      const timeout = setTimeout(() => controller.abort(), 30000);
+      // 45s timeout — Render cold starts can take 15-30s
+      const timeout = setTimeout(() => controller.abort(), 45000);
 
       const response = await fetch(url, {
         ...options,

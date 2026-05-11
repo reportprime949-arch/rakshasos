@@ -155,6 +155,11 @@ export default function OfficerHome() {
   const handleArrived = useCallback(async () => {
     if (!activeDispatch) return;
     setIsArriving(true);
+    console.log('📡 [OFFICER] Confirming arrival for:', activeDispatch.id);
+
+    const controller = new AbortController();
+    // 45s timeout for Render cold starts
+    const timeout = setTimeout(() => controller.abort(), 45000);
 
     try {
       const response = await fetch(`${API_URL}/api/emergency/${activeDispatch.id}/arrive`, {
@@ -164,14 +169,22 @@ export default function OfficerHome() {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
         mode: 'cors',
+        signal: controller.signal,
       });
 
-      if (!response.ok) throw new Error('Arrive failed');
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Arrive failed: ${response.status} ${errorText}`);
+      }
+
+      console.log('✅ [OFFICER] Arrival confirmed');
       setStatus('ARRIVED');
       setDispatch({ ...activeDispatch, status: 'arrived' });
     } catch (error: any) {
-      console.error('🔴 ARRIVE FAILED:', error);
-      alert(`Confirm Arrival Failed: ${error.message}`);
+      console.error('🔴 [OFFICER ARRIVE FAILED]:', error);
+      alert(`Confirm Arrival Failed: ${error.name === 'AbortError' ? 'Request timed out' : error.message}`);
     } finally {
       setIsArriving(false);
     }
@@ -181,6 +194,11 @@ export default function OfficerHome() {
     if (!activeDispatch) return;
     const resolvedId = activeDispatch.id;
     setIsResolving(true);
+    console.log('📡 [OFFICER] Resolving incident:', resolvedId);
+
+    const controller = new AbortController();
+    // 45s timeout for Render cold starts
+    const timeout = setTimeout(() => controller.abort(), 45000);
 
     try {
       const res = await fetch(`${API_URL}/api/emergency/${resolvedId}/resolve`, {
@@ -190,18 +208,25 @@ export default function OfficerHome() {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
         mode: 'cors',
+        signal: controller.signal,
       });
 
-      if (!res.ok) throw new Error('Resolve failed');
+      clearTimeout(timeout);
 
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Resolve failed: ${res.status} ${errorText}`);
+      }
+
+      console.log('✅ [OFFICER] Incident resolved successfully');
       setLastResolvedId(resolvedId);
       setShowResolveModal(true);
       removeIncident(resolvedId);
       clearDispatch();
       fetchIncidents();
     } catch (e: any) {
-      console.error('🔴 [RESOLVE FAILED]:', e);
-      alert(`Resolution Failed: ${e.message}`);
+      console.error('🔴 [OFFICER RESOLVE FAILED]:', e);
+      alert(`Resolution Failed: ${e.name === 'AbortError' ? 'Request timed out (Render Cold Start?)' : e.message}`);
     } finally {
       setIsResolving(false);
     }

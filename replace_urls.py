@@ -3,10 +3,10 @@ import os
 old_urls = [
     "https://backend-server.vercel.app",
     "http://backend-server.vercel.app",
-    "http://localhost:3000",
+    "http://:3000",
     "https://localhost:3000",
     "http://localhost:4000",
-    "http://https://rakshasos-backend.onrender.com",
+    "https://rakshasos-backend.onrender.com",
     "http://127.0.0.1",
     "ws://localhost:3000",
     "ws://rakshasos-backend.onrender.com"
