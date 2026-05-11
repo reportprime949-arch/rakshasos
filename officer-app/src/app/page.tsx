@@ -192,21 +192,22 @@ export default function OfficerHome() {
 
   const handleResolve = useCallback(async () => {
     if (!activeDispatch) return;
+    
     const resolvedId = activeDispatch.id;
     setIsResolving(true);
-    console.log('📡 [OFFICER] Resolving incident:', resolvedId);
 
     const controller = new AbortController();
-    // 45s timeout for Render cold starts
     const timeout = setTimeout(() => controller.abort(), 45000);
 
     try {
+      // Use the new resolve endpoint that includes officerId
       const res = await fetch(`${API_URL}/api/emergency/${resolvedId}/resolve`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
+        body: JSON.stringify({ officerId }), // Pass officerId for backend sync
         mode: 'cors',
         signal: controller.signal,
       });
@@ -219,18 +220,21 @@ export default function OfficerHome() {
       }
 
       console.log('✅ [OFFICER] Incident resolved successfully');
+      
+      // CRITICAL: Clear local state IMMEDIATELY
+      clearDispatch();
+      removeIncident(resolvedId);
+      
       setLastResolvedId(resolvedId);
       setShowResolveModal(true);
-      removeIncident(resolvedId);
-      clearDispatch();
       fetchIncidents();
     } catch (e: any) {
       console.error('🔴 [OFFICER RESOLVE FAILED]:', e);
-      alert(`Resolution Failed: ${e.name === 'AbortError' ? 'Request timed out (Render Cold Start?)' : e.message}`);
+      alert(`Resolution Failed: ${e.name === 'AbortError' ? 'Request timed out' : e.message}`);
     } finally {
       setIsResolving(false);
     }
-  }, [activeDispatch, removeIncident, clearDispatch, fetchIncidents]);
+  }, [activeDispatch, officerId, removeIncident, clearDispatch, fetchIncidents]);
 
   if (!mounted) return null;
 

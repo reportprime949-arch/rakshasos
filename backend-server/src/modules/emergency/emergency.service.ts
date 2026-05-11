@@ -1,6 +1,7 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { EmergencyGateway } from '../../gateway/emergency.gateway';
 import { FirebaseService } from '../../firebase/firebase.service';
+import * as admin from 'firebase-admin';
 
 @Injectable()
 export class EmergencyService {
@@ -66,6 +67,7 @@ export class EmergencyService {
         createdAt: new Date().toISOString(),
         timestamp: Date.now(),
         status: 'pending',
+        active: true,
       };
 
       this.sosComplaints.push(newSOS);
@@ -101,7 +103,12 @@ export class EmergencyService {
 
   async getActiveEmergencies() {
     return this.sosComplaints
-      .filter(s => s.status !== 'resolved')
+      .filter(s => 
+        s.status !== 'resolved' && 
+        s.status !== 'completed' && 
+        s.status !== 'cancelled' &&
+        s.active !== false
+      )
       .map(s => ({ ...s, _fetchedAt: Date.now() }));
   }
 
@@ -112,18 +119,41 @@ export class EmergencyService {
         ...this.sosComplaints[index],
         status,
         ...data,
+        active: !['resolved', 'completed', 'cancelled'].includes(status),
         updatedAt: new Date().toISOString(),
       };
+
+      if (status === 'assigned' && data.assignedOfficerId) {
+        this.sosComplaints[index].officerId = data.assignedOfficerId;
+        
+        // Update Officer Document in Firestore
+        try {
+          const db = this.firebase.getFirestore();
+          if (db) {
+            const FieldValue = admin.firestore.FieldValue;
+            await db.collection('officers').doc(data.assignedOfficerId).set({
+              currentIncidentId: id,
+              active: true,
+              updatedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+            this.logger.log(`👤 [FIREBASE] Officer ${data.assignedOfficerId} assigned to ${id}`);
+          }
+        } catch (fErr) {
+          this.logger.warn(`⚠️ [FIREBASE] Officer assignment sync failed: ${fErr.message}`);
+        }
+      }
 
       this.gateway.emitUpdate(this.sosComplaints[index]);
 
       try {
         const db = this.firebase.getFirestore();
         if (db) {
+          const FieldValue = admin.firestore.FieldValue;
           await db.collection('emergencies').doc(id).update({
             status,
             ...data,
-            updatedAt: new Date().toISOString(),
+            active: !['resolved', 'completed', 'cancelled'].includes(status),
+            updatedAt: FieldValue.serverTimestamp(),
           });
         }
       } catch (fErr) {
@@ -138,24 +168,50 @@ export class EmergencyService {
   async resolveSOS(id: string, officerId: string) {
     const index = this.sosComplaints.findIndex(s => s.id === id);
     if (index !== -1) {
+      const incident = this.sosComplaints[index];
+      const finalOfficerId = (officerId === 'SYSTEM' && incident.officerId) ? incident.officerId : officerId;
+
       const resolved = {
-        ...this.sosComplaints[index],
+        ...incident,
         status: 'resolved',
-        resolvedBy: officerId,
+        active: false,
+        resolved: true,
+        resolvedBy: finalOfficerId,
         resolvedAt: new Date().toISOString(),
       };
 
       try {
         const db = this.firebase.getFirestore();
         if (db) {
-          await db.collection('emergencies').doc(id).update({
+          const batch = db.batch();
+          const FieldValue = admin.firestore.FieldValue;
+          
+          // 1. Update Emergency Document
+          const emergencyRef = db.collection('emergencies').doc(id);
+          batch.update(emergencyRef, {
             status: 'resolved',
-            resolvedBy: officerId,
-            resolvedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
+            active: false,
+            resolved: true,
+            resolvedBy: finalOfficerId,
+            resolvedAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
           });
+
+          // 2. Clear Officer Document
+          if (finalOfficerId && finalOfficerId !== 'SYSTEM') {
+            const officerRef = db.collection('officers').doc(finalOfficerId);
+            batch.set(officerRef, {
+              currentIncidentId: null,
+              active: false,
+              updatedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+          }
+
+          await batch.commit();
+          this.logger.log(`🔥 [FIREBASE] Resolved SOS: ${id} and cleared Officer: ${finalOfficerId}`);
         }
-      } catch (fErr) {
+      }
+ catch (fErr) {
         this.logger.warn(`⚠️ [FIREBASE] Resolve sync failed: ${fErr.message}`);
       }
 

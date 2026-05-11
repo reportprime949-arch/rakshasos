@@ -53,6 +53,7 @@ export const useOfficerFirestore = (
     const q = query(
       emergenciesRef,
       where('status', 'in', ['pending', 'searching', 'assigned', 'enroute', 'arrived']),
+      where('active', '==', true),
     );
 
     const unsubscribe = onSnapshot(

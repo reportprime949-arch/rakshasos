@@ -194,6 +194,19 @@ export class EmergencyGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @SubscribeMessage('officer:resolve')
+  async handleOfficerResolve(@MessageBody() data: { id: string; officerId: string }, @ConnectedSocket() client: Socket) {
+    this.logger.log(`✅ Officer ${data.officerId} resolving SOS: ${data.id} via Socket`);
+    const result = await this.emergencyService.resolveSOS(data.id, data.officerId);
+    
+    if (result) {
+      // Clean up rooms
+      client.leave(`incident_${data.id}`);
+      this.server.to(`incident_${data.id}`).emit('emergency:resolved', { incidentId: data.id });
+      this.logger.log(`🧹 Room incident_${data.id} cleaned up for ${client.id}`);
+    }
+  }
+
   @SubscribeMessage('officer:location_update')
   async handleLocationUpdate(@MessageBody() data: any, @ConnectedSocket() client: Socket) {
     const officerId = data.officerId;
