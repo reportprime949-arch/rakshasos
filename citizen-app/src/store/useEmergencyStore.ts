@@ -64,41 +64,32 @@ export const useEmergencyStore = create<EmergencyState>()(
     error: null,
 
     checkActiveEmergency: async () => {
-      if (typeof window === 'undefined') return;
-      const savedId = localStorage.getItem('rakshasos_active_id');
-      if (!savedId || get().id) return;
-      console.log('🔄 [RECOVERY] Verifying incident with backend:', savedId);
-
-      try {
-        const res = await fetch(`${API_URL}/api/emergency/${savedId}`, { cache: 'no-store' });
-        if (!res.ok) throw new Error('Not found');
-        const data = await res.json();
-
-        if (!data || data.status === 'resolved' || data.status === 'cancelled' || data.status === 'completed') {
-          console.log('🧹 [RECOVERY] Incident resolved/gone — resetting to IDLE');
-          get().reset();
-          return;
-        }
-
-        console.log('✅ [RECOVERY] Active incident found:', savedId, 'status:', data.status);
-        set({ id: savedId, status: 'SEARCHING' });
-      } catch {
-        console.log('🧹 [RECOVERY] Backend unreachable or incident gone — resetting');
-        get().reset();
-      }
+      // Logic removed as per "No auto-restore" requirement.
+      // Every refresh starts fresh to prevent Ghost SOS bugs.
+      console.log('🚫 [RECOVERY] Auto-recovery disabled to prevent Ghost SOS.');
     },
 
     reset: () => {
-      console.log('🧹 [CITIZEN RESET] Clearing state');
+      console.log('🧹 [CITIZEN RESET] Clearing all states and caches');
       lastPushedLat = 0;
       lastPushedLng = 0;
       activeSyncId = null;
       try {
+        // Clear all possible session markers
         localStorage.removeItem('rakshasos_active_id');
         localStorage.removeItem('rakshasos-emergency-session');
+        localStorage.removeItem('emergency-storage');
         sessionStorage.clear();
       } catch { /* SSR */ }
-      set({ id: null, status: 'IDLE', officer: null, location: null, startTime: null, error: null, isTriggering: false });
+      set({ 
+        id: null, 
+        status: 'IDLE', 
+        officer: null, 
+        location: null, 
+        startTime: null, 
+        error: null, 
+        isTriggering: false 
+      });
     },
 
     startCountdown: () => set({ status: 'COUNTDOWN' }),
@@ -208,7 +199,6 @@ export const useEmergencyStore = create<EmergencyState>()(
           console.log('🎯 [SOS] Emergency created! ID:', result.id);
 
           // ── STEP 4: Update local state ──
-          try { localStorage.setItem('rakshasos_active_id', result.id); } catch { /* SSR */ }
           set({
             id: result.id,
             status: 'SEARCHING',
@@ -297,14 +287,25 @@ export const useEmergencyStore = create<EmergencyState>()(
         }
       });
       const gpsInterval = setInterval(async () => {
-        const { location, status } = get();
-        if (location && !TERMINAL_STATUSES.includes(status)) {
+        const { location, status, id: currentId } = get();
+        if (!currentId || TERMINAL_STATUSES.includes(status)) {
+           console.log('🛑 [GPS PUSH] Terminal status or no ID — stopping interval');
+           clearInterval(gpsInterval);
+           return;
+        }
+
+        if (location) {
           const moved = distanceMeters(lastPushedLat, lastPushedLng, location.latitude, location.longitude);
           if (moved < 10 && lastPushedLat !== 0) return;
           lastPushedLat = location.latitude;
           lastPushedLng = location.longitude;
           try {
-            await setDoc(doc(db, 'emergencies', id), { latitude: location.latitude, longitude: location.longitude, updatedAt: serverTimestamp() }, { merge: true });
+            await setDoc(doc(db, 'emergencies', id), { 
+              latitude: location.latitude, 
+              longitude: location.longitude, 
+              updatedAt: serverTimestamp(),
+              source: 'citizen-gps-sync'
+            }, { merge: true });
           } catch (err) { console.error('🛰️ [GPS PUSH ERROR]', err); }
         }
       }, 5000);

@@ -98,12 +98,9 @@ export default function OfficerHome() {
         (i: any) => i.status !== 'resolved' && i.status !== 'completed' && i.status !== 'cancelled',
       );
 
-      const existingIncidents = useOfficerStore.getState().activeIncidents;
-      const mergedMap = new Map<string, any>();
-      existingIncidents.forEach(inc => mergedMap.set(inc.id, inc));
-      filtered.forEach((inc: any) => mergedMap.set(inc.id, inc));
-      const merged = Array.from(mergedMap.values());
-      setIncidents(merged);
+      // Standardize: The backend list is the single source of truth.
+      // Replacing the list ensures resolved/ghost incidents are purged.
+      setIncidents(filtered);
 
       const assigned = data.find(
         (i: any) =>

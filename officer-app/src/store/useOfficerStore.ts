@@ -143,5 +143,8 @@ export const useOfficerStore = create<OfficerState>((set) => ({
       officerId: state.officerId,
       officerName: state.officerName,
       isOnline: state.isOnline,
+      activeDispatch: null,
+      activeIncidents: [],
+      status: 'IDLE',
     })),
 }));

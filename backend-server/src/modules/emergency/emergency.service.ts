@@ -11,7 +11,7 @@ export class EmergencyService {
   private archivedComplaints: any[] = [];
   private recentFingerprints: Map<string, { sos: any; createdAt: number }> = new Map();
 
-  private readonly DEDUP_WINDOW_MS = 10000;
+  private readonly DEDUP_WINDOW_MS = 60000;
 
   constructor(
     @Inject(forwardRef(() => EmergencyGateway))
@@ -31,20 +31,48 @@ export class EmergencyService {
       if (now - val.createdAt > 20000) this.recentFingerprints.delete(key);
     }
 
-    // 2. Check for active emergency for this citizenId
-    const activeEmergency = this.sosComplaints.find(
+    // 2. Check for active emergency for this citizenId in MEMORY
+    const activeMemory = this.sosComplaints.find(
       s => s.citizenId === citizenId && !['resolved', 'completed', 'cancelled'].includes(s.status)
     );
 
-    if (activeEmergency) {
-      this.logger.log(`♻️ [DEDUP] Citizen ${citizenId} already has active SOS: ${activeEmergency.id}`);
-      return { ...activeEmergency, success: true, alreadyActive: true };
+    if (activeMemory) {
+      this.logger.log(`♻️ [DEDUP-MEMORY] Citizen ${citizenId} already has active SOS in memory: ${activeMemory.id}`);
+      return { ...activeMemory, success: true, alreadyActive: true };
     }
 
-    // 3. Cooldown check per fingerprint
+    // 3. Check for active emergency in FIRESTORE (Ghost Guard)
+    try {
+      const db = this.firebase.getFirestore();
+      if (db) {
+        const activeDocs = await db.collection('emergencies')
+          .where('citizenId', '==', citizenId)
+          .where('active', '==', true)
+          .limit(1)
+          .get();
+
+        if (!activeDocs.empty) {
+          const doc = activeDocs.docs[0];
+          const data = doc.data();
+          if (!['resolved', 'completed', 'cancelled'].includes(data.status)) {
+            this.logger.log(`♻️ [DEDUP-FIRESTORE] Citizen ${citizenId} already has active SOS in Firestore: ${doc.id}`);
+            // Restore to memory if missing (server restart scenario)
+            const restored = { id: doc.id, ...data };
+            if (!this.sosComplaints.find(s => s.id === doc.id)) {
+               this.sosComplaints.push(restored);
+            }
+            return { ...restored, success: true, alreadyActive: true };
+          }
+        }
+      }
+    } catch (fErr) {
+      this.logger.warn(`⚠️ [DEDUP-FIRESTORE] Query failed: ${fErr.message}`);
+    }
+
+    // 4. Cooldown check per fingerprint
     const existing = this.recentFingerprints.get(fingerprint);
-    if (existing && now - existing.createdAt < 20000) {
-      this.logger.log(`♻️ [DEDUP] Fingerprint cooldown: ${fingerprint}`);
+    if (existing && now - existing.createdAt < this.DEDUP_WINDOW_MS) {
+      this.logger.log(`♻️ [DEDUP-COOLDOWN] Fingerprint cooldown: ${fingerprint}`);
       return { ...existing.sos, success: true, alreadyActive: true };
     }
 
@@ -216,6 +244,11 @@ export class EmergencyService {
       }
 
       this.gateway.server.emit('emergency:resolved', { incidentId: id });
+      
+      // Clear fingerprints to allow new SOS if needed
+      const fingerprint = `${incident.citizenId}-${incident.emergencyType}`;
+      this.recentFingerprints.delete(fingerprint);
+
       this.sosComplaints.splice(index, 1);
       this.archivedComplaints.push(resolved);
       this.gateway.emitUpdate(resolved);

@@ -35,23 +35,8 @@ export default function CitizenHome() {
 
 
   useEffect(() => {
-    const init = async () => {
-      const savedId = localStorage.getItem('rakshasos_active_id');
-      const activeStatuses = ['COUNTDOWN', 'SEARCHING', 'ASSIGNED', 'EN_ROUTE', 'ARRIVED'];
-      
-      if (savedId && status === 'IDLE') {
-        console.log('🔄 [RECOVERY] Attempting to resume incident:', savedId);
-        await checkActiveEmergency();
-      } else if (!savedId && !activeStatuses.includes(status) && status !== 'IDLE') {
-        // Only reset if we have no saved ID AND we are in a terminal/unexpected state
-        console.log('🧹 [CLEANUP] No active session found — resetting to IDLE');
-        useEmergencyStore.getState().reset();
-      }
-      
-      setMounted(true);
-    };
-    init();
-  }, [checkActiveEmergency, status]);
+    setMounted(true);
+  }, []);
 
   // Countdown timer for SOS activation
   useEffect(() => {

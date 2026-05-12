@@ -168,11 +168,11 @@ export class EmergencyGateway implements OnGatewayConnection, OnGatewayDisconnec
     const payload = { ...incident, msgId: `msg_${Date.now()}_${incident.id}` };
     this.logger.log(`🚨 [BROADCAST] New SOS: ${incident.id} from ${incident.citizenName}`);
 
+    // Standardize broadcast: only to specific roles and the global channel once
+    // server.emit('emergency:new') sends to EVERYONE. We keep it for the general feed.
     this.server.emit('emergency:new', payload);
-    this.server.to('officers').emit('emergency:new', payload);
-    this.server.to('dispatchers').emit('emergency:new', payload);
-
-    this.logger.log(`✅ [BROADCAST] All channels notified for ${incident.id}`);
+    
+    this.logger.log(`✅ [BROADCAST] SOS ${incident.id} transmitted to all channels`);
   }
 
   @SubscribeMessage('officer:accept')
